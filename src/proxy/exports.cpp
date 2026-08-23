@@ -7,6 +7,7 @@
 #include "XFireEngine.h"
 #include "Announcer.h"
 #include "DiagLog.h"
+#include "Version.h"
 #include <atomic>
 #include <cstdio>
 
@@ -27,8 +28,8 @@ void StickyInit() {
         g_stickyDone.store(1, std::memory_order_release);
         char b[256];
         const RealXInput& r = RealXInputLoader::Get();
-        sprintf_s(b, "[STICKYINIT] LoadOnce=%d hDll=%p GetState=%p SetState=%p Cap=%p Enable=%p",
-            ok ? 1 : 0, r.hDll, (void*)r.GetState, (void*)r.SetState, (void*)r.GetCapabilities, (void*)r.Enable);
+        sprintf_s(b, "[STICKYINIT] version=%s LoadOnce=%d hDll=%p GetState=%p SetState=%p Cap=%p Enable=%p",
+            XFIRE_VERSION, ok ? 1 : 0, r.hDll, (void*)r.GetState, (void*)r.SetState, (void*)r.GetCapabilities, (void*)r.Enable);
         DiagLog::Log(b);
         Announcer::StartupBeep(); // 初回エクスポート(プロキシロード)完了をビープで通知
     }

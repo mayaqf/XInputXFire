@@ -139,13 +139,13 @@ int main(int argc, char** argv) {
         }
         prevCombo = curCombo;
 
-        // 1秒サマリ(L2/R2 + 連射判定: 直近1秒の対象トグル回数 >= 6 で連射)
+        // 1秒サマリ(LT/RT + 連射判定: 直近1秒の対象トグル回数 >= 6 で連射)
         if (now - lastSummary >= 1000) {
             bool trig = (s.lt >= 128 || s.rt >= 128);
             int tc = (int)toggleTimes.size();
             bool xfire = trig && tc >= 6;
             char bns[64]; ButtonNames(s.buttons, bns, sizeof(bns));
-            printf("[%6.1fs] === L2=%3u R2=%3u | %-14s | トグル/秒=%-2d %s ===\n",
+            printf("[%6.1fs] === LT=%3u RT=%3u | %-14s | トグル/秒=%-2d %s ===\n",
                 now/1000.0, s.lt, s.rt, bns, tc, xfire ? "XFIRE" : "idle");
             lastSummary = now;
         }

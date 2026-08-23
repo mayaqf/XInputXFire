@@ -1,6 +1,6 @@
 # XInputXFire Proxy DLL
 
-Xboxコントローラ(XInput)の **R2 または L2 トリガーを押している間だけ、方向キー(DPAD)と ABXY ボタンを連射** するツール。XInput Plus のプロキシDLL方式を参考に自作。
+Xboxコントローラ(XInput)の **RT または LT トリガーを押している間だけ、方向キー(DPAD)と ABXY ボタンを連射** するツール。XInput Plus のプロキシDLL方式を参考に自作。
 
 ## 動作方式（プロキシDLL方式）
 
@@ -12,27 +12,37 @@ game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
                               ▼
                           本物 System32\xinput1_3.dll (or 1_4) に転送 → 生state取得
                               ▼
-                          連射エンジン: L2/R2判定 → QPC周期 → DPAD/ABXY 改変
+                          連射エンジン: LT/RT判定 → QPC周期 → DPAD/ABXY 改変
                               ▼ (トリガ値は触らない)
                           ゲームへ改変後 state を返す
 ```
 
 ## 機能（連射ロジック）
 
-- **発動条件**: L2 または R2 が押下閾値(既定150/255)以上。いずれかで発動。
+- **マスター切替(LB+A)**: 連射機能の有効/無効を **LB+A 同時押し(PS名 L1+×)** の立ち上がりでトグル。**起動時は OFF**（メニュー操作中の誤動作を防ぐため）。OFF 中は LT/RT を押しても連射せず入力をそのまま通す。
+- **発動条件**: LT または RT が押下閾値(既定150/255)以上。いずれかで発動。マスター ON のときのみ有効。
 - **連射対象**: DPAD(上下左右) + ABXY（ini で個別指定可）。
 - **周期**: QPC 高精度タイマベース。ON区間(既定50ms)=ボタン押下、OFF区間(既定50ms)=ボタン離。ポーリング間隔(60/120Hz等)に依存しない。
 - **初回ON区間(FirstOnMs)**: 対象ボタン押下直後の最初のON区間だけ専用の長さを指定(既定200ms・0=無効=OnMsと同値)。位相クロックは対象ボタン押下基準で、ボタンを離すとリセットされ次回押下で再びFirstOnMsから。`FirstOnMs` を大きくすれば連射ON中でも「1回だけボタンを押す」がコントロール可能(長い初回ONの間に離せば1回押下で確定)。
 - **ヒステリシス**: 押下閾値150 / 離上閾値140 で、トリガが閾値付近でチャタリングしても連射が暴走しない。
 - **4コントローラ独立**: dwUserIndex 0-3 各々独立状態。
-- **トリガ透過**: L2/R2 のアナログ値はゲームへそのまま伝達（連射は DPAD/ABXY のみに作用）。
+- **トリガ透過**: LT/RT のアナログ値はゲームへそのまま伝達（連射は DPAD/ABXY のみに作用）。
 - **物理押下のみ連射**: 物理的に押されている対象ボタンだけ連射。離せば停止。
+
+> **ボタン名対応**: 本ツールは XInput(Xbox API) ベースのため Xbox 名を基本表記します。PS コントローラでの呼び名との対応は以下の通り。
+>
+> | Xbox | PS | XInput API |
+> |---|---|---|
+> | LT / RT | L2 / R2 | `bLeftTrigger` / `bRightTrigger`（連射発動トリガ・アナログ） |
+> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER`（デジタル肩） |
+> | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y`（顔ボタン・位置対応） |
 
 ## 設定ファイル (XInputXFire.ini)
 
 ゲームexeと同フォルダに配置。無い場合はデフォルト値を使用。
 
 ```ini
+; XInputXFire v1.0.1
 [XFire]
 OnMs=50
 OffMs=50
@@ -41,11 +51,19 @@ FirstOnMs=200
 TriggerThreshold=150
 HysteresisLow=140
 TargetButtons=DPAD_UP|DPAD_DOWN|DPAD_LEFT|DPAD_RIGHT|A|B|X|Y
-EnableL2=1
-EnableR2=1
+EnableLT=1
+EnableRT=1
+; 連射マスター切替コンボ(|区切り・既定 LB|A=PS名 L1+A)。全キー同時押しの立ち上がりで ON/OFF 切替。空で無効(常時ON運用)。
+ToggleButtons=LB|A
+; 起動時のマスター状態(1=ON / 0=OFF・既定0=OFF)。OFF中は連射せず素通し(メニュー操作安全)。
+DefaultEnabled=0
+; トグル切替時の音声アナウンス(1=有効 / 0=無効・既定1)。SAPI で "Enabled/Disabled cross fire." を再生。
+AnnounceEnabled=1
+; 起動音(1=再生 / 0=無効・既定1)。DLL 埋め込み WAVE リソースを再生しプロキシロード完了を通知。
+StartupSound=1
 ```
 
-`TargetButtons` 対応名: `DPAD_UP` `DPAD_DOWN` `DPAD_LEFT` `DPAD_RIGHT` `A` `B` `X` `Y` `LB` `RB` `START` `BACK` `LSB` `RSB`（`|` 区切り）
+`TargetButtons` / `ToggleButtons` 対応名: `DPAD_UP` `DPAD_DOWN` `DPAD_LEFT` `DPAD_RIGHT` `A` `B` `X` `Y` `LB` `RB` `START` `BACK` `LSB` `RSB`（`|` 区切り）
 
 ## プロキシDLLビルド
 
@@ -81,7 +99,7 @@ ctest --test-dir build-x64 --output-on-failure
 ## 検証
 
 1. **単体テスト** (`xfire_unit`): モックQPC時刻注入で連射ロジック(ON/OFF周期・ヒステリシス・トリガ透過・対象外保護・4コントローラ独立)を検証。コントローラ不要。
-2. **テストハーネス** (`test_harness`): プロキシDLLを同フォルダに `xinput1_3.dll` として配置し実行。実コントローラの R2 押下中に対象ボタンが周期トグルするか CSV ログで確認（60秒）。
+2. **テストハーネス** (`test_harness`): プロキシDLLを同フォルダに `xinput1_3.dll` として配置し実行。実コントローラの RT 押下中に対象ボタンが周期トグルするか CSV ログで確認（60秒）。
    - **Smart App Control(SAC) 有効環境では test_harness.exe が起動できない場合があります**。SAC は未署名かつ Microsoft クラウドに実績のない新規バイナリを「未確認」としてブロックし（パスベースではないため Program Files 等へのコピーでも回避不可）、ユーザ側の例外設定もありません。イベントログ `Microsoft-Windows-CodeIntegrity/Operational` の ID 3118/3033 で「Smart App Control Block」を確認できます。
    - なお**本番のプロキシDLLは SAC 下でもブロックされません**（署名済みゲーム exe が LoadLibrary で読み込む DLL は許容されるため）。SAC に引っかかるのは test_harness 等の**独立未署名 exe のみ**です。test_harness が起動できない場合は、SAC オフの別PC/VM で検証するか、本番ゲーム経路で実機確認してください。
 3. **統合**: 許可されたオフラインゲームに配置し実動作確認。
@@ -101,9 +119,9 @@ ctest --test-dir build-x64 --output-on-failure
 
 コントローラが無反応・連射が効かない場合、プロキシDLLは起動時（初回エクスポート呼出時）の診断結果を **`%TEMP%\XInputXFire_xinput.log`** に1行ずつ追記します。このログで原因を切り分けられます。
 
-- `[STICKYINIT] LoadOnce=1 hDll=... GetState=...` → プロキシが正常にロードされ、本物DLLの関数ポインタを取得した（`hDll=0000000000000000` なら本物DLLロード失敗）。
+- `[STICKYINIT] version=<ビルドバージョン> LoadOnce=1 hDll=... GetState=...` → プロキシが正常にロードされ、本物DLLの関数ポインタを取得した（`version=` はビルドバージョン、`hDll=0000000000000000` なら本物DLLロード失敗）。
 - `[LOADER] ...` → 本物DLLのロード失敗・必須エクスポート欠落等（フォールバック先DLLの切り替え状況）。
-- `[CONFIG] ...` → ini の値が非数値・範囲外・不明トークンで既定値に置換された（意図しない挙動の原因特定に）。
+- `[CONFIG] ...` → ini の値が非数値・範囲外・不明トークンで既定値に置換された、または廃止キー（`EnableL2`/`EnableR2`）が検出された（意図しない挙動の原因特定に）。
 - `[XFIRE] QueryPerformanceFrequency returned 0 ...` → 高精度タイマ取得失敗（連射機能が無効化・パススルーのみ動作）。
 
 **プレイ中はこのログは増えません**。診断行は起動時のみ書かれ、毎フレームの `XInputGetState` / 連射処理のホットパスはログを書きません（長時間プレイでも肥大化しません）。ログが `[STICKYINIT]` 1行だけで後が続かない場合はプロキシは正常に動いているので、コントローラ無反応は「ゲームが XInput 経由で入力を取得していない（非対応）」の可能性が高いです（→ [対応ゲームの条件](#対応ゲームの条件)）。

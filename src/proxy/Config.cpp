@@ -70,7 +70,7 @@ void Config::LoadOnce() {
             };
             // bool 項目:1/0/true/false/yes/no/on/off を受理。空(キー不在/空)=既定、
             // 不明値=既定+ログ。従来は GetPrivateProfileIntW で "true"/"yes" 等が 0(無効)に黙って変換
-            // されていた(EnableL2=true で L2 連射が黙って OFF になる等)。
+            // されていた(EnableLT=true で LT 連射が黙って OFF になる等)。
             auto readBool = [sec, &ini](const wchar_t* key, const char* label, bool defv) -> bool {
                 wchar_t b[32] = {0};
                 GetPrivateProfileStringW(sec, key, L"", b, 32, ini.c_str());
@@ -90,9 +90,23 @@ void Config::LoadOnce() {
             g_cfg.firstOnMs        = readClampedDw(L"FirstOnMs",       "FirstOnMs",       g_cfg.firstOnMs,        (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
             g_cfg.triggerThreshold = readClampedByte(L"TriggerThreshold", "TriggerThreshold", g_cfg.triggerThreshold);
             g_cfg.hysteresisLow    = readClampedByte(L"HysteresisLow",    "HysteresisLow",    g_cfg.hysteresisLow);
-            // EnableL2/R2 は 1/0/true/false/yes/no/on/off で記録(不明値=既定+ログ)。
-            g_cfg.enableL2         = readBool(L"EnableL2", "EnableL2", g_cfg.enableL2);
-            g_cfg.enableR2         = readBool(L"EnableR2", "EnableR2", g_cfg.enableR2);
+            // EnableLT/RT は 1/0/true/false/yes/no/on/off で記録(不明値=既定+ログ)。
+            g_cfg.enableLT         = readBool(L"EnableLT", "EnableLT", g_cfg.enableLT);
+            g_cfg.enableRT         = readBool(L"EnableRT", "EnableRT", g_cfg.enableRT);
+            // 廃止キー(EnableL2/EnableR2)の検出: クリーンブレイクで値は読まないが、
+            // 移行時にユーザの意図が黙って反転(無効化->既定true=有効化)するのを防ぐため存在を警告する。
+            struct LegacyKey { const wchar_t* oldName; const wchar_t* newName; };
+            for (const LegacyKey& lk : { LegacyKey{L"EnableL2", L"EnableLT"}, LegacyKey{L"EnableR2", L"EnableRT"} }) {
+                wchar_t lb[32] = {0};
+                GetPrivateProfileStringW(sec, lk.oldName, L"", lb, 32, ini.c_str());
+                if (lb[0] != L'\0') {
+                    char msg[160];
+                    sprintf_s(msg, sizeof(msg),
+                        "[CONFIG] %ls is removed (renamed to %ls); ignored. Use the new key.",
+                        lk.oldName, lk.newName);
+                    DiagLog::Log(msg);
+                }
+            }
             wchar_t buf[256] = {0};
             GetPrivateProfileStringW(sec, L"TargetButtons", L"", buf, 256, ini.c_str());
             int unk = 0;

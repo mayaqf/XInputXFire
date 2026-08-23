@@ -12,9 +12,9 @@ struct XFireConfig {
                           | XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT
                           | XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B
                           | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y; // 連射対象ビットマスク(既定=DPAD全方向+ABXY)
-    bool  enableL2         = true;
-    bool  enableR2         = true;
-    // --- 連射マスタートグル(L2/R2 ゲートの上掛け) ---
+    bool  enableLT         = true;
+    bool  enableRT         = true;
+    // --- 連射マスタートグル(LT/RT ゲートの上掛け) ---
     WORD  toggleButtons    = XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A; // トグル切替コンボ(LB|A)。全ビット同時押下の立ち上がりで ON/OFF 切替
     bool  defaultEnabled   = false; // 起動時のマスター状態(false=OFF・メニュー操作安全)
     bool  announceEnabled  = true; // トグル切替時の SAPI 音声アナウンス有無

@@ -97,8 +97,8 @@ int main() {
         XFireEngine::SetTestClockNowMs(0.0);
         XINPUT_STATE s = MakeState(XINPUT_GAMEPAD_A, 150, 200);
         XFireEngine::Apply(0, &s);
-        Check(s.Gamepad.bLeftTrigger == 150, "T5: L2 unchanged");
-        Check(s.Gamepad.bRightTrigger == 200, "T5: R2 unchanged");
+        Check(s.Gamepad.bLeftTrigger == 150, "T5: LT unchanged");
+        Check(s.Gamepad.bRightTrigger == 200, "T5: RT unchanged");
     }
 
     // T6: 対象外ボタン(LB)は ON/OFF 両区間で触らない
@@ -145,20 +145,20 @@ int main() {
         Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8b: released -> physical A (no xfire)");
     }
 
-    // T9: L2 単独でも発動
+    // T9: LT 単独でも発動
     {
         XFireEngine::ResetControllerState();
         XFireEngine::SetTestClockNowMs(0.0);
-        XINPUT_STATE s = MakeState(XINPUT_GAMEPAD_A, 200, 0); // L2=200
+        XINPUT_STATE s = MakeState(XINPUT_GAMEPAD_A, 200, 0); // LT=200
         XFireEngine::Apply(0, &s);
-        Check((s.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T9: L2 alone triggers xfire ON");
+        Check((s.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T9: LT alone triggers xfire ON");
     }
 
     // T10: 押されていない対象ボタンは連射しない
     {
         XFireEngine::ResetControllerState();
         XFireEngine::SetTestClockNowMs(0.0);
-        XINPUT_STATE s = MakeState(0, 0, 200); // ボタン無し、R2押下
+        XINPUT_STATE s = MakeState(0, 0, 200); // ボタン無し、RT押下
         XFireEngine::Apply(0, &s);          // ON区間だが heldButtons=0
         Check(s.Gamepad.wButtons == 0, "T10: no held target -> no buttons forced");
     }
@@ -218,13 +218,13 @@ int main() {
         Check((s4.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T13c: ON after catch-up");
     }
 
-    // T14: L2+R2 同時押下でも発動(max 値判定)
+    // T14: LT+RT 同時押下でも発動(max 値判定)
     {
         XFireEngine::ResetControllerState();
         XFireEngine::SetTestClockNowMs(0.0);
         XINPUT_STATE s = MakeState(XINPUT_GAMEPAD_A, 130, 200);
         XFireEngine::Apply(0, &s);
-        Check((s.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T14: L2+R2 both trigger ON");
+        Check((s.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T14: LT+RT both trigger ON");
     }
 
     // T8c: OFF区間中にトリガ離上 -> 対象ボタンは物理状態に戻る(連射停止)
@@ -256,7 +256,7 @@ int main() {
         XFireEngine::ResetControllerState();
         XFireEngine::SetTestClockNowMs(0.0);
 
-        // OFF時: R2押下+A押下 -> 連射せず物理Aのまま
+        // OFF時: RT押下+A押下 -> 連射せず物理Aのまま
         XINPUT_STATE a = MakeState(XINPUT_GAMEPAD_A, 0, 200);
         XFireEngine::Apply(0, &a);
         Check(a.Gamepad.wButtons == XINPUT_GAMEPAD_A, "T15: master OFF -> no xfire (A stays physical)");
@@ -266,7 +266,7 @@ int main() {
         XFireEngine::Apply(0, &b);
         Check(b.Gamepad.wButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T15b: combo frame passthrough");
 
-        // ON時: R2押下+A押下 -> ON区間でA押下維持(連射発動)
+        // ON時: RT押下+A押下 -> ON区間でA押下維持(連射発動)
         XFireEngine::ResetControllerState(); // フェーズ状態リセット(ON開始直後をON区間に)
         XFireEngine::SetTestClockNowMs(0.0);
         XINPUT_STATE c = MakeState(XINPUT_GAMEPAD_A, 0, 200);
@@ -278,7 +278,7 @@ int main() {
         XFireEngine::Apply(0, &d);
         Check(d.Gamepad.wButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T15d: combo toggles OFF passthrough");
 
-        // OFF時: R2押下+A押下 -> 再び連射せず物理Aのまま
+        // OFF時: RT押下+A押下 -> 再び連射せず物理Aのまま
         XFireEngine::ResetControllerState();
         XFireEngine::SetTestClockNowMs(0.0);
         XINPUT_STATE e = MakeState(XINPUT_GAMEPAD_A, 0, 200);
@@ -339,7 +339,7 @@ int main() {
 
         // t=50 でAを離す(トリガは押したまま) -> 位相リセット
         XFireEngine::SetTestClockNowMs(50.0);
-        XINPUT_STATE s1 = MakeState(0, 0, 200);         // A離、R2押
+        XINPUT_STATE s1 = MakeState(0, 0, 200);         // A離、RT押
         XFireEngine::Apply(0, &s1);
         Check(s1.Gamepad.wButtons == 0, "T17: t=50 A released -> no buttons");
 
@@ -530,7 +530,7 @@ int main() {
         Check(d.firstOnMs == 200, "T28c: default firstOnMs == 200");
         Check(d.triggerThreshold == 150, "T28d: default triggerThreshold == 150");
         Check(d.hysteresisLow == 140, "T28e: default hysteresisLow == 140");
-        Check(d.enableL2 && d.enableR2, "T28f: default enableL2/R2 true");
+        Check(d.enableLT && d.enableRT, "T28f: default enableLT/RT true");
         Check(d.toggleButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T28g: default toggleButtons LB|A");
         Check(d.defaultEnabled == false, "T28h: default defaultEnabled false");
         Check(d.announceEnabled == true, "T28i: default announceEnabled true");
@@ -559,35 +559,88 @@ int main() {
     // T30: bool 項目は 1/0/true/false/yes/no を受理
     {
         std::wstring path = tempIniPath(L"xfire_t30.ini");
-        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"0", path.c_str());
-        WritePrivateProfileStringW(L"XFire", L"EnableR2", L"false", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableLT", L"0", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableRT", L"false", path.c_str());
         WritePrivateProfileStringW(L"XFire", L"AnnounceEnabled", L"yes", path.c_str());
         WritePrivateProfileStringW(L"XFire", L"StartupSound", L"no", path.c_str());
         const XFireConfig& c = loadFromIni(path);
-        Check(c.enableL2 == false, "T30: EnableL2=0 -> false");
-        Check(c.enableR2 == false, "T30b: EnableR2=false -> false");
+        Check(c.enableLT == false, "T30: EnableLT=0 -> false");
+        Check(c.enableRT == false, "T30b: EnableRT=false -> false");
         Check(c.announceEnabled == true, "T30c: AnnounceEnabled=yes -> true");
         Check(c.startupSound == false, "T30d: StartupSound=no -> false");
         DeleteFileW(path.c_str());
     }
 
-    // T30e: bool 不明値は既定(EnableL2 既定=true)
+    // T30e: bool 不明値は既定(EnableLT/RT 既定=true)。EnableRT 側も対称的に検証。
     {
         std::wstring path = tempIniPath(L"xfire_t30e.ini");
-        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"maybe", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableLT", L"maybe", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableRT", L"maybe", path.c_str());
         const XFireConfig& c = loadFromIni(path);
-        Check(c.enableL2 == true, "T30e: EnableL2=maybe (unknown) -> default true");
+        Check(c.enableLT == true, "T30e: EnableLT=maybe (unknown) -> default true");
+        Check(c.enableRT == true, "T30e2: EnableRT=maybe (unknown) -> default true");
         DeleteFileW(path.c_str());
     }
 
-    // T30f: bool true/1 受理(従来 EnableL2=true は 0->false になっていた silent failure の回帰防止)
+    // T31: クリーンブレイク — 廃止キー EnableL2/EnableR2 は値を読まず無視(新キー不在=>既定 true)。
+    // 旧キーに 0(無効) を書いても新キーが不在なら既定(true)のまま。旧キーのフォールバック読込が
+    // 再導入されるとこのテストが失敗する(リネームの破壊的変更の回帰防止)。
+    {
+        std::wstring path = tempIniPath(L"xfire_t31.ini");
+        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"0", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableR2", L"0", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.enableLT == true, "T31: removed EnableL2=0 ignored -> enableLT default true");
+        Check(c.enableRT == true, "T31b: removed EnableR2=0 ignored -> enableRT default true");
+        DeleteFileW(path.c_str());
+    }
+
+    // T32: エンジンは enableLT/RT フラグでトリガを個別にゲートする(フラグ=false の側は発動しない)。
+    // 既定config(両方true)で発動するのは既存テスト(T2/T3)で担保済み。ここでは抑制側を検証:
+    // フラグ=false のトリガを押しっ放しでも OFF 区間相当(t=60)で対象ボタン(A)が物理押下のまま
+    // トグルしないこと(=連射未発動)を確認する。フラグガードが削られると LT/RT が閾値を超えて
+    // 連射発動し A が OFF 区間で強制離されるため、このテストが失敗する。
+    {
+        XFireConfig tcfg;
+        Config::ApplyDefaults(tcfg);
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        tcfg.toggleButtons = 0; tcfg.announceEnabled = false;
+        XFireEngine::SetMasterEnabled(true);
+
+        // enableLT=false -> LT=200+物理A で連射せず。t=60(OFF区間相当)でも A は物理押下のまま。
+        tcfg.enableLT = false; tcfg.enableRT = true;
+        Config::SetForTest(tcfg);
+        XFireEngine::ResetControllerState();
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE a0 = MakeState(XINPUT_GAMEPAD_A, 200, 0);
+        XFireEngine::Apply(0, &a0);                 // t=0
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE a1 = MakeState(XINPUT_GAMEPAD_A, 200, 0);
+        XFireEngine::Apply(0, &a1);                 // t=60
+        Check((a1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T32: enableLT=false -> LT suppressed, A stays physical at OFF phase");
+
+        // enableRT=false -> RT=200+物理A で連射せず。t=60(OFF区間相当)でも A は物理押下のまま。
+        tcfg.enableLT = true; tcfg.enableRT = false;
+        Config::SetForTest(tcfg);
+        XFireEngine::ResetControllerState();
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE b0 = MakeState(XINPUT_GAMEPAD_A, 0, 200);
+        XFireEngine::Apply(0, &b0);                 // t=0
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE b1 = MakeState(XINPUT_GAMEPAD_A, 0, 200);
+        XFireEngine::Apply(0, &b1);                 // t=60
+        Check((b1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T32b: enableRT=false -> RT suppressed, A stays physical at OFF phase");
+    }
+
+    // T30f: bool true/1 受理(従来 EnableLT=true は 0->false になっていた silent failure の回帰防止)
     {
         std::wstring path = tempIniPath(L"xfire_t30f.ini");
-        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"true", path.c_str());
-        WritePrivateProfileStringW(L"XFire", L"EnableR2", L"1", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableLT", L"true", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableRT", L"1", path.c_str());
         const XFireConfig& c = loadFromIni(path);
-        Check(c.enableL2 == true, "T30f: EnableL2=true -> true (was silently false)");
-        Check(c.enableR2 == true, "T30g: EnableR2=1 -> true");
+        Check(c.enableLT == true, "T30f: EnableLT=true -> true (was silently false)");
+        Check(c.enableRT == true, "T30g: EnableRT=1 -> true");
         DeleteFileW(path.c_str());
     }
 
