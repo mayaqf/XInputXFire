@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: README・対応ゲームの条件
+    url: https://github.com/mayaqf/XInputXFire/blob/main/README.md
+    about: 連射が効かない場合は README の「対応ゲームの条件」「トラブルシューティング」を先にご確認ください。
