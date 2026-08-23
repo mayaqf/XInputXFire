@@ -17,6 +17,7 @@ add_library(XInputProxy SHARED
     src/proxy/Config.cpp
     src/proxy/InputTransform.cpp
     src/proxy/Announcer.cpp
+    src/proxy/DiagLog.cpp
     src/proxy/XInputProxy.def
     src/proxy/StartupSound.rc  # 起動音 WAV を DLL リソースとして埋め込み
 )
@@ -71,6 +72,7 @@ add_executable(xfire_unit
     src/proxy/Config.cpp
     src/proxy/InputTransform.cpp
     src/proxy/Announcer.cpp
+    src/proxy/DiagLog.cpp
 )
 target_include_directories(xfire_unit PRIVATE src/proxy)
 target_compile_definitions(xfire_unit PRIVATE

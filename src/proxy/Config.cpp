@@ -1,12 +1,17 @@
 // Config.cpp - ini 設定の遅延読込・キャッシュ
 #include "Config.h"
 #include "InputTransform.h"
+#include "DiagLog.h"
 #include <string>
 #include <atomic>
+#include <cwchar>
+#include <cstdio>
 
 static XFireConfig g_cfg;
 static SRWLOCK g_loadLock = SRWLOCK_INIT;
 static std::atomic<int> g_loaded{0};
+// テスト専用: LoadOnce で読む ini パス注入(nullptr=exe同梱の既定)。
+static const wchar_t* g_iniPathOverride = nullptr;
 
 void Config::ApplyDefaults(XFireConfig& cfg) {
     // ヘッダのメンバ初期値を唯一のデフォルト定義源とし、ここでは再適用のみ行う。
@@ -28,29 +33,56 @@ void Config::LoadOnce() {
     AcquireSRWLockExclusive(&g_loadLock);
     if (!g_loaded.load(std::memory_order_relaxed)) {
         ApplyDefaults(g_cfg);
-        std::wstring ini = ExeDir() + L"XInputXFire.ini";
+        std::wstring ini = g_iniPathOverride ? std::wstring(g_iniPathOverride) : (ExeDir() + L"XInputXFire.ini");
         if (GetFileAttributesW(ini.c_str()) != INVALID_FILE_ATTRIBUTES) {
             const wchar_t* sec = L"XFire";
-            // 範囲クランプ(値域は Config.h の kOnMsMin/kOnMsMax/kFirstOnMsMin/kByteMax が唯一ソース)。
-            auto clampDw = [](INT v, INT lo, INT hi) -> DWORD {
-                if (v < lo) v = lo; if (v > hi) v = hi; return (DWORD)v;
+            // 数値項目は文字列で読み wcstol で解析:空(キー不在/空)=既定、非数値=既定+ログ、
+            // 範囲外=クランプ+ログ。従来は GetPrivateProfileIntW で非数値/空が 0 -> クランプ最小に
+            // 黙って変換されユーザ意図が消失していた(TriggerThreshold= 空が即トリガ発動等)。
+            auto readClampedDw = [sec, &ini](const wchar_t* key, const char* label,
+                                            DWORD defv, INT lo, INT hi) -> DWORD {
+                wchar_t buf[64] = {0};
+                GetPrivateProfileStringW(sec, key, L"", buf, 64, ini.c_str());
+                if (buf[0] == L'\0') return defv; // キー不在/空 -> 既定
+                wchar_t* end = nullptr;
+                long v = wcstol(buf, &end, 10);
+                if (end == buf) { // 非数値
+                    char msg[128];
+                    sprintf_s(msg, sizeof(msg), "[CONFIG] %s: non-numeric value -> default", label);
+                    DiagLog::Log(msg);
+                    return defv;
+                }
+                if (v < lo) {
+                    char msg[128];
+                    sprintf_s(msg, sizeof(msg), "[CONFIG] %s=%ld out of range -> clamped to %d", label, v, lo);
+                    DiagLog::Log(msg);
+                    v = lo;
+                } else if (v > hi) {
+                    char msg[128];
+                    sprintf_s(msg, sizeof(msg), "[CONFIG] %s=%ld out of range -> clamped to %d", label, v, hi);
+                    DiagLog::Log(msg);
+                    v = hi;
+                }
+                return (DWORD)v;
             };
-            auto clampByte = [](INT v) -> BYTE {
-                if (v < 0) v = 0; if (v > (INT)Config::kByteMax) v = (INT)Config::kByteMax; return (BYTE)v;
+            auto readClampedByte = [&](const wchar_t* key, const char* label, BYTE defv) -> BYTE {
+                return (BYTE)readClampedDw(key, label, defv, 0, (INT)Config::kByteMax);
             };
-            g_cfg.onMs             = clampDw(GetPrivateProfileIntW(sec, L"OnMs",            (INT)g_cfg.onMs,             ini.c_str()), (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
-            g_cfg.offMs            = clampDw(GetPrivateProfileIntW(sec, L"OffMs",           (INT)g_cfg.offMs,            ini.c_str()), (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.onMs             = readClampedDw(L"OnMs",            "OnMs",            g_cfg.onMs,             (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.offMs            = readClampedDw(L"OffMs",           "OffMs",           g_cfg.offMs,            (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
             // FirstOnMs は 0=無効を許可([kFirstOnMsMin,kOnMsMax])。0 のとき最初のON区間は OnMs と同値。
-            g_cfg.firstOnMs        = clampDw(GetPrivateProfileIntW(sec, L"FirstOnMs",       (INT)g_cfg.firstOnMs,        ini.c_str()), (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
-            g_cfg.triggerThreshold = clampByte(GetPrivateProfileIntW(sec, L"TriggerThreshold", (INT)g_cfg.triggerThreshold, ini.c_str()));
-            g_cfg.hysteresisLow    = clampByte(GetPrivateProfileIntW(sec, L"HysteresisLow",    (INT)g_cfg.hysteresisLow,    ini.c_str()));
+            g_cfg.firstOnMs        = readClampedDw(L"FirstOnMs",       "FirstOnMs",       g_cfg.firstOnMs,        (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.triggerThreshold = readClampedByte(L"TriggerThreshold", "TriggerThreshold", g_cfg.triggerThreshold);
+            g_cfg.hysteresisLow    = readClampedByte(L"HysteresisLow",    "HysteresisLow",    g_cfg.hysteresisLow);
             // EnableL2/R2 は "1"/"0" で記録("true"/"false" は GetPrivateProfileInt で 0 になるため非推奨)
             g_cfg.enableL2         = GetPrivateProfileIntW(sec, L"EnableL2", g_cfg.enableL2 ? 1 : 0, ini.c_str()) != 0;
             g_cfg.enableR2         = GetPrivateProfileIntW(sec, L"EnableR2", g_cfg.enableR2 ? 1 : 0, ini.c_str()) != 0;
             wchar_t buf[256] = {0};
             GetPrivateProfileStringW(sec, L"TargetButtons", L"", buf, 256, ini.c_str());
-            WORD parsed = InputTransform::ParseTargetButtons(buf);
-            // 空指定(0)はデフォルト維持。明示的に無効化したい場合は TargetButtons= を空にする運用は非対応。
+            int unk = 0;
+            WORD parsed = InputTransform::ParseTargetButtons(buf, &unk);
+            if (unk > 0) DiagLog::Log("[CONFIG] TargetButtons: unknown token(s) ignored");
+            // 空指定(0)はデフォルト維持。TargetButtons を完全に無効化(0)することは非対応。
             if (parsed != 0) g_cfg.targetButtons = parsed;
 
             // --- 連射マスタートグル設定 ---
@@ -65,8 +97,11 @@ void Config::LoadOnce() {
             if (tbuf[0] == L'\0') {
                 g_cfg.toggleButtons = 0; // 明示的無効化(常時ON運用)
             } else {
-                WORD tparsed = InputTransform::ParseTargetButtons(tbuf);
+                int tunk = 0;
+                WORD tparsed = InputTransform::ParseTargetButtons(tbuf, &tunk);
+                if (tunk > 0) DiagLog::Log("[CONFIG] ToggleButtons: unknown token(s) ignored");
                 if (tparsed != 0) g_cfg.toggleButtons = tparsed;
+                // 全トークン不明(tparsed=0)は既定維持(既定のトグルコンボが有効なまま)。
             }
             g_cfg.defaultEnabled  = GetPrivateProfileIntW(sec, L"DefaultEnabled",  g_cfg.defaultEnabled  ? 1 : 0, ini.c_str()) != 0;
             g_cfg.announceEnabled = GetPrivateProfileIntW(sec, L"AnnounceEnabled", g_cfg.announceEnabled ? 1 : 0, ini.c_str()) != 0;
@@ -87,6 +122,17 @@ void Config::SetForTest(const XFireConfig& cfg) {
     AcquireSRWLockExclusive(&g_loadLock);
     g_cfg = cfg;
     g_loaded.store(1, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_loadLock);
+}
+void Config::ResetForTest() {
+    AcquireSRWLockExclusive(&g_loadLock);
+    ApplyDefaults(g_cfg);
+    g_loaded.store(0, std::memory_order_release);
+    ReleaseSRWLockExclusive(&g_loadLock);
+}
+void Config::SetIniPathForTest(const wchar_t* path) {
+    AcquireSRWLockExclusive(&g_loadLock);
+    g_iniPathOverride = path;
     ReleaseSRWLockExclusive(&g_loadLock);
 }
 #endif

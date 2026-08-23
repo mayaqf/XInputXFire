@@ -22,13 +22,10 @@ static const Entry kTable[] = {
     {L"LSB",        XINPUT_GAMEPAD_LEFT_THUMB},
     {L"RSB",        XINPUT_GAMEPAD_RIGHT_THUMB},
 };
-
-inline void TrimInPlace(wchar_t* s) {
-    while (*s == L' ' || *s == L'\t') s++; // 先頭は呼出元で扱う
-}
 }
 
-WORD InputTransform::ParseTargetButtons(const wchar_t* text) {
+WORD InputTransform::ParseTargetButtons(const wchar_t* text, int* unknownCount) {
+    if (unknownCount) *unknownCount = 0;
     if (!text) return 0;
     WORD mask = 0;
     // コピーして wcstok で破壊的分割
@@ -41,9 +38,11 @@ WORD InputTransform::ParseTargetButtons(const wchar_t* text) {
         wchar_t* end = tok + wcslen(tok);
         while (end > tok && (end[-1] == L' ' || end[-1] == L'\t')) { *--end = L'\0'; }
         if (*tok == L'\0') { tok = wcstok_s(nullptr, L"|", &ctx); continue; }
+        bool matched = false;
         for (const auto& e : kTable) {
-            if (_wcsicmp(tok, e.name) == 0) { mask |= e.bit; break; }
+            if (_wcsicmp(tok, e.name) == 0) { mask |= e.bit; matched = true; break; }
         }
+        if (!matched && unknownCount) (*unknownCount)++;
         tok = wcstok_s(nullptr, L"|", &ctx);
     }
     return mask;

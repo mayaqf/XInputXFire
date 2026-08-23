@@ -32,7 +32,7 @@ namespace Config {
 
     // デフォルト値で初期化(targetButtons = DPAD全方向+ABXY)
     void ApplyDefaults(XFireConfig& cfg);
-    // 初回GetState時に1回だけ実行(スレッドセーフ)。
+    // 初回エクスポート呼出時に1回だけ実行(スレッドセーフ)。
     // exeと同フォルダの XInputXFire.ini を読込。不在時はデフォルト値。
     void LoadOnce();
     // ロード済み設定への参照(LoadOnce後のみ有効)
@@ -40,5 +40,9 @@ namespace Config {
 #ifdef XFIRE_TEST
     // テスト専用: 設定を直接注入(LoadOnce なしで即座に有効化)。
     void SetForTest(const XFireConfig& cfg);
+    // テスト専用: ロード済みフラグをクリアし、次回 LoadOnce を有効化する。
+    void ResetForTest();
+    // テスト専用: LoadOnce で読む ini パスを注入する(nullptr で exe 同梱の既定に戻す)。
+    void SetIniPathForTest(const wchar_t* path);
 #endif
 }

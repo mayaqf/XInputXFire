@@ -415,6 +415,137 @@ int main() {
         Check(Config::kByteMax == 255, "T21d: kByteMax == 255");
     }
 
+    // ---- Config::LoadOnce 経路の検証(従来は SetForTest でバイパスされ未検証) ----
+    // 一時 ini を書き、SetIniPathForTest + ResetForTest + LoadOnce で解析パスを通す。
+    auto tempIniPath = [](const wchar_t* name) -> std::wstring {
+        wchar_t tmp[MAX_PATH] = {0};
+        DWORD n = GetTempPathW(MAX_PATH, tmp);
+        std::wstring p(tmp, n);
+        p += name;
+        return p;
+    };
+    auto loadFromIni = [&](const std::wstring& path) -> const XFireConfig& {
+        Config::SetIniPathForTest(path.c_str());
+        Config::ResetForTest();
+        Config::LoadOnce();
+        return Config::Get();
+    };
+
+    // T22: 範囲外/非数値はクランプ/既定(安全不変条件・無限ループ防止の直接検証)
+    {
+        std::wstring path = tempIniPath(L"xfire_t22.ini");
+        WritePrivateProfileStringW(L"XFire", L"OnMs", L"0", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"OffMs", L"999999", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"FirstOnMs", L"-1", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"TriggerThreshold", L"999", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"HysteresisLow", L"-5", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.onMs == 1, "T22: OnMs=0 -> clamped to 1");
+        Check(c.offMs == 10000, "T22b: OffMs=999999 -> clamped to 10000");
+        Check(c.firstOnMs == 0, "T22c: FirstOnMs=-1 -> clamped to 0");
+        Check(c.triggerThreshold == 255, "T22d: TriggerThreshold=999 -> clamped to 255");
+        Check(c.hysteresisLow == 0, "T22e: HysteresisLow=-5 -> clamped to 0");
+        DeleteFileW(path.c_str());
+    }
+
+    // T22f: 非数値値は既定を採用(従来は 0 -> クランプ最小に黙って変換されていた)
+    {
+        std::wstring path = tempIniPath(L"xfire_t22f.ini");
+        WritePrivateProfileStringW(L"XFire", L"OnMs", L"fast", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.onMs == 50, "T22f: OnMs=fast (non-numeric) -> default 50");
+        DeleteFileW(path.c_str());
+    }
+
+    // T22g: 空値は既定を採用(従来は 0 -> クランプ最小になり TriggerThreshold= 空が
+    //       即トリガ発動になっていた silent failure の直接回帰防止)
+    {
+        std::wstring path = tempIniPath(L"xfire_t22g.ini");
+        WritePrivateProfileStringW(L"XFire", L"TriggerThreshold", L"", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"OnMs", L"", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.triggerThreshold == 150, "T22g: TriggerThreshold= empty -> default 150 (not 0)");
+        Check(c.onMs == 50, "T22g2: OnMs= empty -> default 50 (not clamped to 1)");
+        DeleteFileW(path.c_str());
+    }
+
+    // T23: ToggleButtons キー不在 -> 既定 LB|A
+    {
+        std::wstring path = tempIniPath(L"xfire_t23.ini");
+        WritePrivateProfileStringW(L"XFire", L"OnMs", L"50", path.c_str()); // ToggleButtons は書かない
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.toggleButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T23: ToggleButtons absent -> default LB|A");
+        DeleteFileW(path.c_str());
+    }
+
+    // T24: ToggleButtons= 空 -> 0(トグル無効化・常時ON)
+    {
+        std::wstring path = tempIniPath(L"xfire_t24.ini");
+        WritePrivateProfileStringW(L"XFire", L"ToggleButtons", L"", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.toggleButtons == 0, "T24: ToggleButtons= empty -> 0 (toggle disabled)");
+        DeleteFileW(path.c_str());
+    }
+
+    // T25: TargetButtons= 空 -> デフォルト維持(DPAD全方向+ABXY)
+    {
+        std::wstring path = tempIniPath(L"xfire_t25.ini");
+        WritePrivateProfileStringW(L"XFire", L"TargetButtons", L"", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        WORD def = XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN | XINPUT_GAMEPAD_DPAD_LEFT
+                 | XINPUT_GAMEPAD_DPAD_RIGHT | XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B
+                 | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y;
+        Check(c.targetButtons == def, "T25: TargetButtons= empty -> default maintained");
+        DeleteFileW(path.c_str());
+    }
+
+    // T26: ToggleButtons=FOO(全トークン不明) -> 既定維持(不明名は無視・既定コンボが有効なまま)
+    {
+        std::wstring path = tempIniPath(L"xfire_t26.ini");
+        WritePrivateProfileStringW(L"XFire", L"ToggleButtons", L"FOO", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.toggleButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T26: ToggleButtons=FOO -> default maintained");
+        DeleteFileW(path.c_str());
+    }
+
+    // T27: ParseTargetButtons は不明トークンを無視しつつ unknownCount で報告
+    {
+        int unk = 0;
+        WORD m = InputTransform::ParseTargetButtons(L"A|FOO|B", &unk);
+        Check(m == (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B), "T27: A|FOO|B -> A|B (FOO ignored)");
+        Check(unk == 1, "T27b: unknown count == 1");
+        // 空白/ケース耐性 + 不明複数
+        int unk2 = 0;
+        WORD m2 = InputTransform::ParseTargetButtons(L" a | xyz | b ", &unk2);
+        Check(m2 == (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B), "T27c: ' a | xyz | b ' -> A|B (trim/case)");
+        Check(unk2 == 1, "T27d: unknown count == 1 (xyz)");
+    }
+
+    // T28: ApplyDefaults の全既定値(出荷デフォルトの回帰防止)
+    {
+        XFireConfig d;
+        Config::ApplyDefaults(d);
+        Check(d.onMs == 50, "T28: default onMs == 50");
+        Check(d.offMs == 50, "T28b: default offMs == 50");
+        Check(d.firstOnMs == 200, "T28c: default firstOnMs == 200");
+        Check(d.triggerThreshold == 150, "T28d: default triggerThreshold == 150");
+        Check(d.hysteresisLow == 140, "T28e: default hysteresisLow == 140");
+        Check(d.enableL2 && d.enableR2, "T28f: default enableL2/R2 true");
+        Check(d.toggleButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T28g: default toggleButtons LB|A");
+        Check(d.defaultEnabled == false, "T28h: default defaultEnabled false");
+        Check(d.announceEnabled == true, "T28i: default announceEnabled true");
+        Check(d.startupSound == true, "T28j: default startupSound true");
+        WORD def = XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN | XINPUT_GAMEPAD_DPAD_LEFT
+                 | XINPUT_GAMEPAD_DPAD_RIGHT | XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B
+                 | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y;
+        Check(d.targetButtons == def, "T28k: default targetButtons DPAD+ABXY");
+    }
+
+    // 後続テストのためにメイン設定を復元(Config テストが g_cfg を書き換えたため)
+    Config::SetIniPathForTest(nullptr);
+    Config::SetForTest(cfg);
+    XFireEngine::SetMasterEnabled(true);
+
     printf("\n%d checks, %d failed\n", g_checks, g_failures);
     if (g_failures == 0) { printf("ALL TESTS PASSED\n"); return 0; }
     return 1;

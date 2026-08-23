@@ -7,7 +7,7 @@
 //   xinput1_3  → System32\xinput1_3.dll (非存在時 1.4 へフォールバック)
 //   xinput1_4  → System32\xinput1_4.dll
 //   xinput9_1_0→ System32\XInput9_1_0.dll (Vista 以降必須、フォールバック不要)
-//   未知       → 1.3 → 1.4 → 9.1.0 (1.4 優先: GetAudioDeviceIds 実装のため)
+//   未知       → 1.3 → 1.4 → 9.1.0 (9.1.0 より 1.4 を優先: GetAudioDeviceIds 実装のため)
 //
 // 【重要】System32 のフルパスを構築してロードする。
 // 単に LoadLibraryExW(L"xinput1_3.dll", LOAD_LIBRARY_SEARCH_SYSTEM32) では、
@@ -19,7 +19,9 @@
 // フルパス指定なら正規化パスで既存モジュールを判定するためプロキシ自身と区別され、
 // System32 の本物DLLのみがロードされる。
 #include "XInputProxy.h"
+#include "DiagLog.h"
 #include <atomic>
+#include <cstdio>
 
 static RealXInput g_real = {};
 static SRWLOCK    g_loadLock = SRWLOCK_INIT;
@@ -71,8 +73,15 @@ static HMODULE LoadSystem(const wchar_t* name) {
     memcpy(path + dl + 1, name, nl * sizeof(wchar_t));
     path[dl + 1 + nl] = L'\0';
 
-    // 存在確認(System32 に非存在verのDLLは無い → ロード試行を省き確実にフォールバック)
-    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) return nullptr;
+    // 存在確認(System32 に非存在verのDLLは無い → ロード試行を省き確実にフォールバック)。
+    // INVALID_FILE_ATTRIBUTES はアクセス拒否等でも返るため、ファイル未存在以外はログに残す。
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
+        DWORD err = GetLastError();
+        if (err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND) {
+            DiagLog::Log("[LOADER] GetFileAttributes failed on system DLL path (non file-not-found)");
+        }
+        return nullptr;
+    }
 
     // フルパス指定: 依存DLL解決は既定の検索パス(System32 等)で行われる。
     // xinput*.dll の依存はシステムDLLのみなので LOAD_WITH_ALTERED_SEARCH_PATH 等は不要。
@@ -86,6 +95,7 @@ bool RealXInputLoader::LoadOnce() {
         // プロキシ自身の名前でロード先システムDLLを選択
         wchar_t self[64];
         GetSelfBaseName(self, 64);
+        if (self[0] == L'\0') DiagLog::Log("[LOADER] self module name unknown -> fallback chain 1.3->1.4->9.1.0");
         HMODULE h = nullptr;
         if (wcsstr(self, L"xinput9_1_0")) {
             h = LoadSystem(L"XInput9_1_0.dll");
@@ -114,6 +124,16 @@ bool RealXInputLoader::LoadOnce() {
             g_real.GetBatteryInformation     = (PFN_XInputGetBatteryInformation)GetProcAddress(h, "XInputGetBatteryInformation");
             g_real.GetDSoundAudioDeviceGuids = (PFN_XInputGetDSoundAudioDeviceGuids)GetProcAddress(h, "XInputGetDSoundAudioDeviceGuids");
             g_real.GetAudioDeviceIds         = (PFN_XInputGetAudioDeviceIds)GetProcAddress(h, "XInputGetAudioDeviceIds");
+            // 必須エクスポートが欠けていればログ(GetAudioDeviceIds/GetDSoundAudioDeviceGuids は
+            // バージョン依存で optional なので対象外)。ゲームは exports.cpp で ERROR_DEVICE_NOT_CONNECTED
+            // 等を受け取るが、ログで「コントローラ未接続」とプロキシ束縛失敗を区別できるようにする。
+            if (!g_real.GetState || !g_real.SetState || !g_real.GetCapabilities) {
+                char msg[160];
+                sprintf_s(msg, sizeof(msg),
+                    "[LOADER] essential export missing (GetState=%p SetState=%p Cap=%p)",
+                    (void*)g_real.GetState, (void*)g_real.SetState, (void*)g_real.GetCapabilities);
+                DiagLog::Log(msg);
+            }
         }
         g_loaded.store(1, std::memory_order_release); // g_real 書き込み完了を可視化
     }

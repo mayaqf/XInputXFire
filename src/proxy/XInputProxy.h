@@ -4,6 +4,7 @@
 // 動的ロード(GetProcAddress)のみで利用する。xinput.lib は一切リンクしない。
 #pragma once
 #include <windows.h>
+#include <cstddef> // offsetof
 
 // ---- XInput ボタンビット定数(XINPUT_GAMEPAD_*) ----
 #define XINPUT_GAMEPAD_DPAD_UP          0x0001
@@ -64,6 +65,11 @@ typedef struct _XINPUT_BATTERY_INFORMATION {
     BYTE BatteryLevel;
 } XINPUT_BATTERY_INFORMATION;
 #pragma pack(pop)
+
+// ---- ABI 整合のコンパイル時検証(自前定義が Windows ABI と一致することを固定) ----
+static_assert(offsetof(XINPUT_STATE, dwPacketNumber) == 0, "XINPUT_STATE ABI: dwPacketNumber offset 0");
+static_assert(offsetof(XINPUT_STATE, Gamepad) == 4, "XINPUT_STATE ABI: Gamepad offset 4");
+static_assert(sizeof(XINPUT_GAMEPAD) == 12, "XINPUT_GAMEPAD ABI: size 12");
 
 // ---- 本物DLLの関数ポインタ型 ----
 typedef DWORD (WINAPI *PFN_XInputGetState)(DWORD, XINPUT_STATE*);

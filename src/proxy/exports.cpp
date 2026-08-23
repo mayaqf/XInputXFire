@@ -6,39 +6,17 @@
 #include "Config.h"
 #include "XFireEngine.h"
 #include "Announcer.h"
+#include "DiagLog.h"
 #include <atomic>
 #include <cstdio>
 
 namespace {
 SRWLOCK g_stickyLock = SRWLOCK_INIT;
 std::atomic<int> g_stickyDone{0};
-
-// 起動診断用1行ログ(初回エクスポート呼出時のみ)。%TEMP%\XInputXFire_xinput.log。
-// プロキシがロードされたか/どの本物DLLにバインドしたかを確認するため、毎回1回だけ書く。
-// CRT ファイル I/O は早い段階で安全でないため Win32 API のみで追記する。
-void XLog(const char* msg) {
-    static SRWLOCK lk = SRWLOCK_INIT;
-    AcquireSRWLockExclusive(&lk);
-    wchar_t tmp[MAX_PATH] = {0};
-    DWORD n = GetTempPathW(MAX_PATH, tmp);
-    wchar_t path[MAX_PATH] = {0};
-    if (n && n < MAX_PATH) { wchar_t* p = path; for (DWORD i = 0; i < n; ++i) *p++ = tmp[i];
-        const wchar_t* s = L"XInputXFire_xinput.log"; while (*s) *p++ = *s++; *p = 0; }
-    else { const wchar_t* s = L"XInputXFire_xinput.log"; wchar_t* p = path; while (*s) *p++ = *s++; *p = 0; }
-    HANDLE h = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h != INVALID_HANDLE_VALUE) {
-        char line[384];
-        int len = sprintf_s(line, sizeof(line), "%s\r\n", msg);
-        if (len > 0) { DWORD written = 0; WriteFile(h, line, (DWORD)len, &written, nullptr); }
-        CloseHandle(h);
-    }
-    ReleaseSRWLockExclusive(&lk);
-}
 } // namespace
 
 // 初回エクスポート呼出時に1回だけ。DllMainでは呼ばない(ローダーロック回避)。
-// 順序: 本物DLLロード → ini読込 → QPC初期化 → 起動診断ログ1行。
+// 順序: 本物DLLロード → ini読込 → QPC初期化 → 起動診断ログ1行 → 起動音再生。
 void StickyInit() {
     if (g_stickyDone.load(std::memory_order_acquire)) return;
     AcquireSRWLockExclusive(&g_stickyLock);
@@ -51,7 +29,7 @@ void StickyInit() {
         const RealXInput& r = RealXInputLoader::Get();
         sprintf_s(b, "[STICKYINIT] LoadOnce=%d hDll=%p GetState=%p SetState=%p Cap=%p Enable=%p",
             ok ? 1 : 0, r.hDll, (void*)r.GetState, (void*)r.SetState, (void*)r.GetCapabilities, (void*)r.Enable);
-        XLog(b);
+        DiagLog::Log(b);
         Announcer::StartupBeep(); // 初回エクスポート(プロキシロード)完了をビープで通知
     }
     ReleaseSRWLockExclusive(&g_stickyLock);
