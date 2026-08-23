@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure (x64)
+        run: cmake -S . -B build -A x64
+
+      - name: Build (Release)
+        run: cmake --build build --config Release
+
+      - name: Test (xfire_unit)
+        run: ctest --test-dir build --build-config Release --output-on-failure
