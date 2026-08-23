@@ -541,6 +541,56 @@ int main() {
         Check(d.targetButtons == def, "T28k: default targetButtons DPAD+ABXY");
     }
 
+    // T29: 有効値は LoadOnce 経由で正しく設定される(従来テストは「既定維持」パスのみ)
+    {
+        std::wstring path = tempIniPath(L"xfire_t29.ini");
+        WritePrivateProfileStringW(L"XFire", L"ToggleButtons", L"A|B", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"TargetButtons", L"X|Y", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"OffMs", L"0", path.c_str());       // 下限クランプ
+        WritePrivateProfileStringW(L"XFire", L"FirstOnMs", L"999999", path.c_str()); // 上限クランプ
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.toggleButtons == (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B), "T29: ToggleButtons=A|B -> A|B via LoadOnce");
+        Check(c.targetButtons == (XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y), "T29b: TargetButtons=X|Y -> X|Y via LoadOnce");
+        Check(c.offMs == 1, "T29c: OffMs=0 -> clamped to 1");
+        Check(c.firstOnMs == 10000, "T29d: FirstOnMs=999999 -> clamped to 10000");
+        DeleteFileW(path.c_str());
+    }
+
+    // T30: bool 項目は 1/0/true/false/yes/no を受理
+    {
+        std::wstring path = tempIniPath(L"xfire_t30.ini");
+        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"0", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableR2", L"false", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"AnnounceEnabled", L"yes", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"StartupSound", L"no", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.enableL2 == false, "T30: EnableL2=0 -> false");
+        Check(c.enableR2 == false, "T30b: EnableR2=false -> false");
+        Check(c.announceEnabled == true, "T30c: AnnounceEnabled=yes -> true");
+        Check(c.startupSound == false, "T30d: StartupSound=no -> false");
+        DeleteFileW(path.c_str());
+    }
+
+    // T30e: bool 不明値は既定(EnableL2 既定=true)
+    {
+        std::wstring path = tempIniPath(L"xfire_t30e.ini");
+        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"maybe", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.enableL2 == true, "T30e: EnableL2=maybe (unknown) -> default true");
+        DeleteFileW(path.c_str());
+    }
+
+    // T30f: bool true/1 受理(従来 EnableL2=true は 0->false になっていた silent failure の回帰防止)
+    {
+        std::wstring path = tempIniPath(L"xfire_t30f.ini");
+        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"true", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableR2", L"1", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.enableL2 == true, "T30f: EnableL2=true -> true (was silently false)");
+        Check(c.enableR2 == true, "T30g: EnableR2=1 -> true");
+        DeleteFileW(path.c_str());
+    }
+
     // 後続テストのためにメイン設定を復元(Config テストが g_cfg を書き換えたため)
     Config::SetIniPathForTest(nullptr);
     Config::SetForTest(cfg);

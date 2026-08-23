@@ -54,7 +54,7 @@ void XFireEngine::InitOnce() {
         LARGE_INTEGER f;
         QueryPerformanceFrequency(&f);
         g_qpcToMs = (f.QuadPart > 0) ? 1000.0 / (double)f.QuadPart : 0.0;
-        if (g_qpcToMs <= 0.0) DiagLog::Log("[XFIRE] QueryPerformanceFrequency returned 0 -> rapid fire disabled (passthrough only)");
+        if (g_qpcToMs <= 0.0) DiagLog::Log("[XFIRE] QueryPerformanceFrequency returned 0 -> xfire disabled (passthrough only)");
         // 起動時のマスター状態を Config から設定(Config::LoadOnce は InitOnce 前に呼ばれる)。
         g_xfireEnabled.store(Config::Get().defaultEnabled, std::memory_order_release);
         g_inited.store(1, std::memory_order_release); // g_qpcToMs 書き込み完了を可視化

@@ -68,15 +68,31 @@ void Config::LoadOnce() {
             auto readClampedByte = [&](const wchar_t* key, const char* label, BYTE defv) -> BYTE {
                 return (BYTE)readClampedDw(key, label, defv, 0, (INT)Config::kByteMax);
             };
+            // bool 項目:1/0/true/false/yes/no/on/off を受理。空(キー不在/空)=既定、
+            // 不明値=既定+ログ。従来は GetPrivateProfileIntW で "true"/"yes" 等が 0(無効)に黙って変換
+            // されていた(EnableL2=true で L2 連射が黙って OFF になる等)。
+            auto readBool = [sec, &ini](const wchar_t* key, const char* label, bool defv) -> bool {
+                wchar_t b[32] = {0};
+                GetPrivateProfileStringW(sec, key, L"", b, 32, ini.c_str());
+                if (b[0] == L'\0') return defv;
+                if (_wcsicmp(b, L"1") == 0 || _wcsicmp(b, L"true") == 0
+                    || _wcsicmp(b, L"yes") == 0 || _wcsicmp(b, L"on") == 0) return true;
+                if (_wcsicmp(b, L"0") == 0 || _wcsicmp(b, L"false") == 0
+                    || _wcsicmp(b, L"no") == 0 || _wcsicmp(b, L"off") == 0) return false;
+                char msg[128];
+                sprintf_s(msg, sizeof(msg), "[CONFIG] %s: non-boolean value -> default", label);
+                DiagLog::Log(msg);
+                return defv;
+            };
             g_cfg.onMs             = readClampedDw(L"OnMs",            "OnMs",            g_cfg.onMs,             (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
             g_cfg.offMs            = readClampedDw(L"OffMs",           "OffMs",           g_cfg.offMs,            (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
             // FirstOnMs は 0=無効を許可([kFirstOnMsMin,kOnMsMax])。0 のとき最初のON区間は OnMs と同値。
             g_cfg.firstOnMs        = readClampedDw(L"FirstOnMs",       "FirstOnMs",       g_cfg.firstOnMs,        (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
             g_cfg.triggerThreshold = readClampedByte(L"TriggerThreshold", "TriggerThreshold", g_cfg.triggerThreshold);
             g_cfg.hysteresisLow    = readClampedByte(L"HysteresisLow",    "HysteresisLow",    g_cfg.hysteresisLow);
-            // EnableL2/R2 は "1"/"0" で記録("true"/"false" は GetPrivateProfileInt で 0 になるため非推奨)
-            g_cfg.enableL2         = GetPrivateProfileIntW(sec, L"EnableL2", g_cfg.enableL2 ? 1 : 0, ini.c_str()) != 0;
-            g_cfg.enableR2         = GetPrivateProfileIntW(sec, L"EnableR2", g_cfg.enableR2 ? 1 : 0, ini.c_str()) != 0;
+            // EnableL2/R2 は 1/0/true/false/yes/no/on/off で記録(不明値=既定+ログ)。
+            g_cfg.enableL2         = readBool(L"EnableL2", "EnableL2", g_cfg.enableL2);
+            g_cfg.enableR2         = readBool(L"EnableR2", "EnableR2", g_cfg.enableR2);
             wchar_t buf[256] = {0};
             GetPrivateProfileStringW(sec, L"TargetButtons", L"", buf, 256, ini.c_str());
             int unk = 0;
@@ -103,10 +119,10 @@ void Config::LoadOnce() {
                 if (tparsed != 0) g_cfg.toggleButtons = tparsed;
                 // 全トークン不明(tparsed=0)は既定維持(既定のトグルコンボが有効なまま)。
             }
-            g_cfg.defaultEnabled  = GetPrivateProfileIntW(sec, L"DefaultEnabled",  g_cfg.defaultEnabled  ? 1 : 0, ini.c_str()) != 0;
-            g_cfg.announceEnabled = GetPrivateProfileIntW(sec, L"AnnounceEnabled", g_cfg.announceEnabled ? 1 : 0, ini.c_str()) != 0;
-            // 起動音(1=再生 / 0=無効)。DLL 埋め込み WAVE リソースを PlaySound で再生。
-            g_cfg.startupSound = GetPrivateProfileIntW(sec, L"StartupSound", g_cfg.startupSound ? 1 : 0, ini.c_str()) != 0;
+            g_cfg.defaultEnabled  = readBool(L"DefaultEnabled",  "DefaultEnabled",  g_cfg.defaultEnabled);
+            g_cfg.announceEnabled = readBool(L"AnnounceEnabled", "AnnounceEnabled", g_cfg.announceEnabled);
+            // 起動音(1/0 または true/false)。DLL 埋め込み WAVE リソースを PlaySound で再生。
+            g_cfg.startupSound    = readBool(L"StartupSound",    "StartupSound",    g_cfg.startupSound);
         }
         g_loaded.store(1, std::memory_order_release); // g_cfg 書き込み完了を可視化
     }

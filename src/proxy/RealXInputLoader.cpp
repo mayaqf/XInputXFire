@@ -85,7 +85,15 @@ static HMODULE LoadSystem(const wchar_t* name) {
 
     // フルパス指定: 依存DLL解決は既定の検索パス(System32 等)で行われる。
     // xinput*.dll の依存はシステムDLLのみなので LOAD_WITH_ALTERED_SEARCH_PATH 等は不要。
-    return LoadLibraryExW(path, nullptr, 0);
+    HMODULE h = LoadLibraryExW(path, nullptr, 0);
+    if (!h) {
+        // ファイルは存在してもロード失敗するケース(依存DLL欠落・壊れたイメージ・
+        // アーキテクチャ不一致・アクセス拒否)。フォールバック連鎖へ進むが診断のためログ。
+        char msg[160];
+        sprintf_s(msg, sizeof(msg), "[LOADER] LoadLibraryExW failed err=%lu", GetLastError());
+        DiagLog::Log(msg);
+    }
+    return h;
 }
 
 bool RealXInputLoader::LoadOnce() {
