@@ -93,6 +93,20 @@ void Config::LoadOnce() {
             // EnableLT/RT は 1/0/true/false/yes/no/on/off で記録(不明値=既定+ログ)。
             g_cfg.enableLT         = readBool(L"EnableLT", "EnableLT", g_cfg.enableLT);
             g_cfg.enableRT         = readBool(L"EnableRT", "EnableRT", g_cfg.enableRT);
+            // 廃止キー(EnableL2/EnableR2)の検出: クリーンブレイクで値は読まないが、
+            // 移行時にユーザの意図が黙って反転(無効化->既定true=有効化)するのを防ぐため存在を警告する。
+            struct LegacyKey { const wchar_t* oldName; const wchar_t* newName; };
+            for (const LegacyKey& lk : { LegacyKey{L"EnableL2", L"EnableLT"}, LegacyKey{L"EnableR2", L"EnableRT"} }) {
+                wchar_t lb[32] = {0};
+                GetPrivateProfileStringW(sec, lk.oldName, L"", lb, 32, ini.c_str());
+                if (lb[0] != L'\0') {
+                    char msg[160];
+                    sprintf_s(msg, sizeof(msg),
+                        "[CONFIG] %ls is removed (renamed to %ls); ignored. Use the new key.",
+                        lk.oldName, lk.newName);
+                    DiagLog::Log(msg);
+                }
+            }
             wchar_t buf[256] = {0};
             GetPrivateProfileStringW(sec, L"TargetButtons", L"", buf, 256, ini.c_str());
             int unk = 0;

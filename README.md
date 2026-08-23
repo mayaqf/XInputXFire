@@ -34,7 +34,7 @@ game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
 > | Xbox | PS | XInput API |
 > |---|---|---|
 > | LT / RT | L2 / R2 | `bLeftTrigger` / `bRightTrigger`（連射発動トリガ・アナログ） |
-> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `RIGHT_SHOULDER`（デジタル肩） |
+> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER`（デジタル肩） |
 > | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y`（顔ボタン・位置対応） |
 
 ## 設定ファイル (XInputXFire.ini)
@@ -119,9 +119,9 @@ ctest --test-dir build-x64 --output-on-failure
 
 コントローラが無反応・連射が効かない場合、プロキシDLLは起動時（初回エクスポート呼出時）の診断結果を **`%TEMP%\XInputXFire_xinput.log`** に1行ずつ追記します。このログで原因を切り分けられます。
 
-- `[STICKYINIT] version=1.0.1 LoadOnce=1 hDll=... GetState=...` → プロキシが正常にロードされ、本物DLLの関数ポインタを取得した（`version=` はビルドバージョン、`hDll=0000000000000000` なら本物DLLロード失敗）。
+- `[STICKYINIT] version=<ビルドバージョン> LoadOnce=1 hDll=... GetState=...` → プロキシが正常にロードされ、本物DLLの関数ポインタを取得した（`version=` はビルドバージョン、`hDll=0000000000000000` なら本物DLLロード失敗）。
 - `[LOADER] ...` → 本物DLLのロード失敗・必須エクスポート欠落等（フォールバック先DLLの切り替え状況）。
-- `[CONFIG] ...` → ini の値が非数値・範囲外・不明トークンで既定値に置換された（意図しない挙動の原因特定に）。
+- `[CONFIG] ...` → ini の値が非数値・範囲外・不明トークンで既定値に置換された、または廃止キー（`EnableL2`/`EnableR2`）が検出された（意図しない挙動の原因特定に）。
 - `[XFIRE] QueryPerformanceFrequency returned 0 ...` → 高精度タイマ取得失敗（連射機能が無効化・パススルーのみ動作）。
 
 **プレイ中はこのログは増えません**。診断行は起動時のみ書かれ、毎フレームの `XInputGetState` / 連射処理のホットパスはログを書きません（長時間プレイでも肥大化しません）。ログが `[STICKYINIT]` 1行だけで後が続かない場合はプロキシは正常に動いているので、コントローラ無反応は「ゲームが XInput 経由で入力を取得していない（非対応）」の可能性が高いです（→ [対応ゲームの条件](#対応ゲームの条件)）。

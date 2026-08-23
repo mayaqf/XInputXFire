@@ -571,13 +571,66 @@ int main() {
         DeleteFileW(path.c_str());
     }
 
-    // T30e: bool 不明値は既定(EnableLT 既定=true)
+    // T30e: bool 不明値は既定(EnableLT/RT 既定=true)。EnableRT 側も対称的に検証。
     {
         std::wstring path = tempIniPath(L"xfire_t30e.ini");
         WritePrivateProfileStringW(L"XFire", L"EnableLT", L"maybe", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableRT", L"maybe", path.c_str());
         const XFireConfig& c = loadFromIni(path);
         Check(c.enableLT == true, "T30e: EnableLT=maybe (unknown) -> default true");
+        Check(c.enableRT == true, "T30e2: EnableRT=maybe (unknown) -> default true");
         DeleteFileW(path.c_str());
+    }
+
+    // T31: クリーンブレイク — 廃止キー EnableL2/EnableR2 は値を読まず無視(新キー不在=>既定 true)。
+    // 旧キーに 0(無効) を書いても新キーが不在なら既定(true)のまま。旧キーのフォールバック読込が
+    // 再導入されるとこのテストが失敗する(リネームの破壊的変更の回帰防止)。
+    {
+        std::wstring path = tempIniPath(L"xfire_t31.ini");
+        WritePrivateProfileStringW(L"XFire", L"EnableL2", L"0", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"EnableR2", L"0", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.enableLT == true, "T31: removed EnableL2=0 ignored -> enableLT default true");
+        Check(c.enableRT == true, "T31b: removed EnableR2=0 ignored -> enableRT default true");
+        DeleteFileW(path.c_str());
+    }
+
+    // T32: エンジンは enableLT/RT フラグでトリガを個別にゲートする(フラグ=false の側は発動しない)。
+    // 既定config(両方true)で発動するのは既存テスト(T2/T3)で担保済み。ここでは抑制側を検証:
+    // フラグ=false のトリガを押しっ放しでも OFF 区間相当(t=60)で対象ボタン(A)が物理押下のまま
+    // トグルしないこと(=連射未発動)を確認する。フラグガードが削られると LT/RT が閾値を超えて
+    // 連射発動し A が OFF 区間で強制離されるため、このテストが失敗する。
+    {
+        XFireConfig tcfg;
+        Config::ApplyDefaults(tcfg);
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        tcfg.toggleButtons = 0; tcfg.announceEnabled = false;
+        XFireEngine::SetMasterEnabled(true);
+
+        // enableLT=false -> LT=200+物理A で連射せず。t=60(OFF区間相当)でも A は物理押下のまま。
+        tcfg.enableLT = false; tcfg.enableRT = true;
+        Config::SetForTest(tcfg);
+        XFireEngine::ResetControllerState();
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE a0 = MakeState(XINPUT_GAMEPAD_A, 200, 0);
+        XFireEngine::Apply(0, &a0);                 // t=0
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE a1 = MakeState(XINPUT_GAMEPAD_A, 200, 0);
+        XFireEngine::Apply(0, &a1);                 // t=60
+        Check((a1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T32: enableLT=false -> LT suppressed, A stays physical at OFF phase");
+
+        // enableRT=false -> RT=200+物理A で連射せず。t=60(OFF区間相当)でも A は物理押下のまま。
+        tcfg.enableLT = true; tcfg.enableRT = false;
+        Config::SetForTest(tcfg);
+        XFireEngine::ResetControllerState();
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE b0 = MakeState(XINPUT_GAMEPAD_A, 0, 200);
+        XFireEngine::Apply(0, &b0);                 // t=0
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE b1 = MakeState(XINPUT_GAMEPAD_A, 0, 200);
+        XFireEngine::Apply(0, &b1);                 // t=60
+        Check((b1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T32b: enableRT=false -> RT suppressed, A stays physical at OFF phase");
     }
 
     // T30f: bool true/1 受理(従来 EnableLT=true は 0->false になっていた silent failure の回帰防止)
