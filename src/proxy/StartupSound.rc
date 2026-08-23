@@ -1,0 +1,7 @@
+// StartupSound.rc - embed the startup WAV into the DLL as a WAVE resource.
+// PlaySound(SND_RESOURCE) plays a WAVE-typed resource.
+// "startup.wav" is located next to this .rc (src/proxy/).
+// rc.exe is not built with /utf-8, so keep this file ASCII-only.
+#include "StartupSound.h"
+
+IDR_STARTUP_WAV WAVE "startup.wav"

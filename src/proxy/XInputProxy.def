@@ -1,0 +1,19 @@
+; XInputProxy.def - export definition
+; IMPORTANT: ordinals MUST match the real xinput1_3.dll exactly.
+; Some games import XINPUT1_3.dll by ORDINAL (2,3,5), not by name (via a
+; custom XInput wrapper DLL). If ordinals are off, the wrapper calls the wrong functions (e.g. calling
+; GetAudioDeviceIds when it expects GetState) and controller input breaks.
+; Real xinput1_3.dll ordinals (Wine .spec == MS binary):
+;   1=DllMain 2=GetState 3=SetState 4=GetCapabilities 5=Enable
+;   6=GetDSoundAudioDeviceGuids 7=GetBatteryInformation 8=GetKeystroke 100=GetStateEx
+; GetAudioDeviceIds was added in xinput1_4 (absent in 1.3); the game's main exe
+; resolves it by name via GetProcAddress, so export it named at @9.
+EXPORTS
+    XInputGetState @2
+    XInputSetState @3
+    XInputGetCapabilities @4
+    XInputEnable @5
+    XInputGetDSoundAudioDeviceGuids @6
+    XInputGetBatteryInformation @7
+    XInputGetKeystroke @8
+    XInputGetAudioDeviceIds @9
