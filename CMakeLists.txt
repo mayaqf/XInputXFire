@@ -1,6 +1,6 @@
 # XInputXFire Proxy DLL
 cmake_minimum_required(VERSION 3.20)
-project(XInputXFireProxy LANGUAGES CXX)
+project(XInputXFireProxy LANGUAGES CXX VERSION 1.0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,7 +23,10 @@ add_library(XInputProxy SHARED
 )
 target_include_directories(XInputProxy PRIVATE src/proxy)
 target_compile_definitions(XInputProxy PRIVATE
-    WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0602 NOMINMAX)
+    WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0602 NOMINMAX
+    XFIRE_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    XFIRE_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    XFIRE_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 if(MSVC)
     target_compile_options(XInputProxy PRIVATE /W4 /permissive- /utf-8)
 endif()
@@ -76,7 +79,10 @@ add_executable(xfire_unit
 )
 target_include_directories(xfire_unit PRIVATE src/proxy)
 target_compile_definitions(xfire_unit PRIVATE
-    XFIRE_TEST WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0602 NOMINMAX)
+    XFIRE_TEST WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0602 NOMINMAX
+    XFIRE_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+    XFIRE_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+    XFIRE_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 if(MSVC)
     target_compile_options(xfire_unit PRIVATE /W4 /permissive- /utf-8)
 endif()

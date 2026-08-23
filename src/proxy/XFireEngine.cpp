@@ -1,5 +1,5 @@
 // XFireEngine.cpp - 連射タイミング制御コア
-// 連射マスタートグル(既定OFF)の上に、L2/R2 押下中のみ連射対象ボタン(DPAD/ABXY)を
+// 連射マスタートグル(既定OFF)の上に、LT/RT 押下中のみ連射対象ボタン(DPAD/ABXY)を
 // QPC ベース周期で ON/OFF 反転。トリガ値(bLeftTrigger/bRightTrigger)は触らない。
 // 4コントローラ独立。コンボキー(LB+A)立ち上がりでマスターON/OFF切替 + SAPI 音声。
 #include "XFireEngine.h"
@@ -98,10 +98,10 @@ void XFireEngine::Apply(DWORD idx, XINPUT_STATE* p) {
         return;
     }
 
-    // 有効なトリガの最大値(L2/R2 いずれか押下で発動)
+    // 有効なトリガの最大値(LT/RT いずれか押下で発動)
     BYTE trig = 0;
-    if (cfg.enableR2 && g.bRightTrigger > trig) trig = g.bRightTrigger;
-    if (cfg.enableL2 && g.bLeftTrigger  > trig) trig = g.bLeftTrigger;
+    if (cfg.enableRT && g.bRightTrigger > trig) trig = g.bRightTrigger;
+    if (cfg.enableLT && g.bLeftTrigger  > trig) trig = g.bLeftTrigger;
 
     // ヒステリシス: 押下判定は高閾値、離上判定は低閾値
     bool pressed = s.active ? (trig >= cfg.hysteresisLow)

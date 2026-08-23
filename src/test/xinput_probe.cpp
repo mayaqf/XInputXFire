@@ -35,7 +35,7 @@ static void Probe(const wchar_t* name) {
         XINPUT_STATE st{};
         DWORD hr = fn(i, &st);
         if (hr == 0) { // ERROR_SUCCESS
-            wprintf(L"[%s] idx=%lu CONNECTED pkt=%lu L2=%u R2=%u btn=0x%04x\n",
+            wprintf(L"[%s] idx=%lu CONNECTED pkt=%lu LT=%u RT=%u btn=0x%04x\n",
                 name, i, st.dwPacketNumber, st.Gamepad.bLeftTrigger,
                 st.Gamepad.bRightTrigger, st.Gamepad.wButtons);
         }
