@@ -20,6 +20,14 @@ struct XFireConfig {
     bool  announceEnabled  = true; // トグル切替時の SAPI 音声アナウンス有無
     // --- 起動音(プロキシロード完了の通知・DLL 埋め込み WAVE リソース再生) ---
     bool  startupSound = true; // 起動音の有無(true=再生 / false=無効)
+
+    // --- ボタン単独連射([RapidFire] セクション・トリガ不要でボタン押しっぱなしで連射) ---
+    // 既存の [XFire] の FirstOnMs/OnMs/OffMs/TargetButtons とは別設定。
+    // 両リストに入っているボタンは「トリガ優先」で解決(トリガ押下中はトリガモードが駆動)。
+    DWORD buttonFirstOnMs     = 500; // ボタン単独の初回ON区間(ms・0=無効=buttonOnMsと同値・既定500)
+    DWORD buttonOnMs          = 50;  // ボタン単独のON区間(ms)
+    DWORD buttonOffMs         = 50;  // ボタン単独のOFF区間(ms)
+    WORD  buttonTargetButtons = XINPUT_GAMEPAD_A; // ボタン単独連射対象(既定=A=決定ボタン連打用途)
 };
 
 namespace Config {

@@ -36,6 +36,7 @@ int main() {
     cfg.triggerThreshold = 128; cfg.hysteresisLow = 64;
     cfg.toggleButtons = 0; // テスト入力(A/LB 等)がコンボ検出と干渉しないようトグル機能無効化
     cfg.announceEnabled = false; // テスト中は実際の音声再生を避ける
+    cfg.buttonTargetButtons = 0; // T1-T14 はトリガモード単体検証。ボタン単独モードは無効化
     Config::SetForTest(cfg);
     // 既存ケースはマスターON前提で検証(本番はコンボキーで切替)。
     XFireEngine::SetMasterEnabled(true);
@@ -539,6 +540,11 @@ int main() {
                  | XINPUT_GAMEPAD_DPAD_RIGHT | XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B
                  | XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y;
         Check(d.targetButtons == def, "T28k: default targetButtons DPAD+ABXY");
+        // [RapidFire] 既定値
+        Check(d.buttonFirstOnMs == 500, "T28l: default buttonFirstOnMs == 500");
+        Check(d.buttonOnMs == 50, "T28m: default buttonOnMs == 50");
+        Check(d.buttonOffMs == 50, "T28n: default buttonOffMs == 50");
+        Check(d.buttonTargetButtons == XINPUT_GAMEPAD_A, "T28o: default buttonTargetButtons == A");
     }
 
     // T29: 有効値は LoadOnce 経由で正しく設定される(従来テストは「既定維持」パスのみ)
@@ -606,6 +612,7 @@ int main() {
         tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
         tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
         tcfg.toggleButtons = 0; tcfg.announceEnabled = false;
+        tcfg.buttonTargetButtons = 0; // T32 はトリガガート検証。ボタン単独モードは無効化
         XFireEngine::SetMasterEnabled(true);
 
         // enableLT=false -> LT=200+物理A で連射せず。t=60(OFF区間相当)でも A は物理押下のまま。
@@ -642,6 +649,375 @@ int main() {
         Check(c.enableLT == true, "T30f: EnableLT=true -> true (was silently false)");
         Check(c.enableRT == true, "T30g: EnableRT=1 -> true");
         DeleteFileW(path.c_str());
+    }
+
+    // ---- ボタン単独連射([RapidFire])の検証 ----
+    // 共通: トリガモードと分離するため targetButtons=0(トリガ連射対象なし)。
+    //       buttonTargetButtons でボタン単独対象を指定。トグル無効・音声OFF。
+
+    // T33: ボタン単独 A(トリガなし) -> FirstOnMs=500 初回ON、以降 50/50 サイクル
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = 0;          // トリガモード無効化
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 500; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0); // トリガなし
+        XFireEngine::Apply(0, &s0);                         // t=0 最初のON(0-500)
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T33: t=0 first ON (button-only)");
+
+        XFireEngine::SetTestClockNowMs(100.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s1);                         // t=100 まだ buttonFirstOnMs 内
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T33b: t=100 still first ON");
+
+        XFireEngine::SetTestClockNowMs(510.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s2);                         // t=510 FirstOnMs終了->OFF(500-550)
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_A) == 0, "T33c: t=510 OFF after first ON");
+
+        XFireEngine::SetTestClockNowMs(560.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s3);                         // t=560 ON(550-600)
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T33d: t=560 normal ON (buttonOnMs)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T34: 重複なし B(ボタン単独リストのみ)はトリガ押下中も連射継続(他は独立)
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = XINPUT_GAMEPAD_A;       // トリガリスト=A のみ(B と重複なし)
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_B;  // ボタン単独リスト=B のみ
+        bcfg.buttonFirstOnMs = 0; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // RT 押下(トリガ活性)+ B 押下。B はトリガリストに入らないのでボタン単独モードが駆動。
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_B, 0, 200);
+        XFireEngine::Apply(0, &s0);                         // t=0 ON(buttonOnMs 0-50)
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_B) != 0, "T34: t=0 B ON (button-only despite trigger)");
+
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_B, 0, 200);
+        XFireEngine::Apply(0, &s1);                         // t=60 OFF(50-100)
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_B) == 0, "T34b: t=60 B OFF (button-only continues cycling)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T35: 重複 A(両リスト)・トリガ押下 -> トリガモード(FirstOnMs=200)が駆動・ボタンクロックはAをスキップ
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 200;  // トリガ初回ON=200
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = XINPUT_GAMEPAD_A;        // トリガリスト=A
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;  // ボタン単独リスト=A(重複)
+        bcfg.buttonFirstOnMs = 500; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50; // ボタン初回ON=500
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 200); // トリガ活性
+        XFireEngine::Apply(0, &s0);                             // t=0 トリガ初回ON(0-200)
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T35: t=0 ON (trigger owns overlap)");
+
+        XFireEngine::SetTestClockNowMs(100.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 200);
+        XFireEngine::Apply(0, &s1);                             // t=100 まだトリガFirstOnMs(200)内
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T35b: t=100 still trigger first ON (200)");
+
+        // t=210: トリガクロック(200)なら OFF。ボタンクロック(500)が駆動していたらまだON。
+        //       A が離れていればトリガ優先が確認できる。
+        XFireEngine::SetTestClockNowMs(210.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_A, 0, 200);
+        XFireEngine::Apply(0, &s2);                             // t=210 トリガOFF(200-250)
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_A) == 0, "T35c: t=210 OFF -> trigger clock (200) owns A, not button clock (500)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T36: 重複 A(両リスト)・トリガ離し -> ボタン単独モード(FirstOnMs=500)が駆動
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 200;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 500; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // トリガなし(RT=0<128 -> 非活性) + A 押下 -> ボタン単独モード(初回ON=500)
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s0);                         // t=0 ボタン初回ON(0-500)
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T36: t=0 button first ON (500)");
+
+        // t=210: トリガクロック(200)なら OFF。ボタンクロック(500)ならまだON。
+        XFireEngine::SetTestClockNowMs(210.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s1);                          // t=210 まだボタンFirstOnMs内
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T36b: t=210 still button first ON (500) -> button clock owns A when trigger inactive");
+
+        XFireEngine::SetTestClockNowMs(510.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s2);                          // t=510 ボタンOFF(500-550)
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_A) == 0, "T36c: t=510 OFF (button clock cycle)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T37: ボタン単独 FirstOnMs=0 -> 初回ONは buttonOnMs と同値
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = 0;
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 0; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s0);                          // t=0 ON(0-50)
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T37: t=0 ON");
+
+        XFireEngine::SetTestClockNowMs(60.0);                // buttonOnMs=50 -> t=60 は OFF
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_A) == 0, "T37b: t=60 OFF (first ON == buttonOnMs)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T38: ボタン単独も対象離で位相リセット -> 再押下で FirstOnMs から再スタート
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = 0;
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 500; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s0);                          // t=0 最初のON開始(0-500)
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T38: t=0 first ON start");
+
+        XFireEngine::SetTestClockNowMs(50.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 0);                // A 離す -> 位相リセット
+        XFireEngine::Apply(0, &s1);
+        Check(s1.Gamepad.wButtons == 0, "T38b: t=50 A released -> no buttons");
+
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s2);                          // t=60 新FirstOnMs開始(60-560)
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T38c: t=60 re-press restarts first ON");
+
+        // t=550: 古いクロック(0基準)なら既にOFFだが新クロック(60基準)ではまだFirstOnMs内
+        XFireEngine::SetTestClockNowMs(550.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s3);                          // 550-60=490 < 500 -> まだON
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T38d: t=550 still first ON (re-anchored)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T39: [RapidFire] LoadOnce 経路の検証(既定・クランプ・対象解析)
+    {
+        // T39: [RapidFire] セクション不在 -> 既定(500/50/50/A)
+        {
+            std::wstring path = tempIniPath(L"xfire_t39.ini");
+            WritePrivateProfileStringW(L"XFire", L"OnMs", L"50", path.c_str()); // [RapidFire] は書かない
+            const XFireConfig& c = loadFromIni(path);
+            Check(c.buttonFirstOnMs == 500, "T39: RapidFire absent -> buttonFirstOnMs default 500");
+            Check(c.buttonOnMs == 50, "T39b: RapidFire absent -> buttonOnMs default 50");
+            Check(c.buttonOffMs == 50, "T39c: RapidFire absent -> buttonOffMs default 50");
+            Check(c.buttonTargetButtons == XINPUT_GAMEPAD_A, "T39d: RapidFire absent -> buttonTargetButtons default A");
+            DeleteFileW(path.c_str());
+        }
+        // T39e: 範囲外はクランプ
+        {
+            std::wstring path = tempIniPath(L"xfire_t39e.ini");
+            WritePrivateProfileStringW(L"RapidFire", L"FirstOnMs", L"-1", path.c_str());
+            WritePrivateProfileStringW(L"RapidFire", L"OnMs", L"0", path.c_str());
+            WritePrivateProfileStringW(L"RapidFire", L"OffMs", L"999999", path.c_str());
+            const XFireConfig& c = loadFromIni(path);
+            Check(c.buttonFirstOnMs == 0, "T39e: RapidFire.FirstOnMs=-1 -> clamped to 0");
+            Check(c.buttonOnMs == 1, "T39f: RapidFire.OnMs=0 -> clamped to 1");
+            Check(c.buttonOffMs == 10000, "T39g: RapidFire.OffMs=999999 -> clamped to 10000");
+            DeleteFileW(path.c_str());
+        }
+        // T39h: TargetButtons 解析(空=既定維持・有効値=反映)
+        {
+            std::wstring path = tempIniPath(L"xfire_t39h.ini");
+            WritePrivateProfileStringW(L"RapidFire", L"TargetButtons", L"", path.c_str()); // 空->既定維持
+            const XFireConfig& c = loadFromIni(path);
+            Check(c.buttonTargetButtons == XINPUT_GAMEPAD_A, "T39h: RapidFire.TargetButtons empty -> default A maintained");
+            DeleteFileW(path.c_str());
+        }
+        {
+            std::wstring path = tempIniPath(L"xfire_t39i.ini");
+            WritePrivateProfileStringW(L"RapidFire", L"TargetButtons", L"X|Y", path.c_str());
+            const XFireConfig& c = loadFromIni(path);
+            Check(c.buttonTargetButtons == (XINPUT_GAMEPAD_X | XINPUT_GAMEPAD_Y), "T39i: RapidFire.TargetButtons=X|Y -> X|Y");
+            DeleteFileW(path.c_str());
+        }
+    }
+
+    // T40: マスター無効時はボタン単独連射も停止(A は物理のまま)
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = 0;
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 0; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(false); // マスターOFF
+        XFireEngine::ResetControllerState();
+
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s0);                          // マスターOFF -> 素通し
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T40: master OFF -> A physical at t=0");
+
+        XFireEngine::SetTestClockNowMs(60.0);                // ボタン単独なら OFF 区間で A が離れるはず
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T40b: master OFF -> A still physical at t=60 (no button-only)");
+
+        XFireEngine::SetMasterEnabled(true);
+        Config::SetForTest(cfg);
+    }
+
+    // T41: ボタン単独連射の ON/OFF で dwPacketNumber が進む(差分型ゲーム向け)
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = 0; bcfg.announceEnabled = false;
+        bcfg.targetButtons = 0;
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 0; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        s0.dwPacketNumber = 100;
+        XFireEngine::Apply(0, &s0);                          // ON: A押(prev=0)->変化->101
+        Check(s0.dwPacketNumber == 101, "T41: first ON advances packet");
+
+        XFireEngine::SetTestClockNowMs(10.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        s1.dwPacketNumber = 101;
+        XFireEngine::Apply(0, &s1);                          // ON継続(prev=A)->変化なし->101
+        Check(s1.dwPacketNumber == 101, "T41b: same ON keeps packet");
+
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        s2.dwPacketNumber = 101;
+        XFireEngine::Apply(0, &s2);                          // OFF: A離(prev=A)->変化->102
+        Check(s2.dwPacketNumber == 102, "T41c: OFF advances packet");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T42: マスタートグル OFF 時にボタン単独の位相状態もリセット -> 再ONで FirstOnMs から再開
+    //      (修正前: bStarted が残存し再ON後に古い位相で catch-up され OFF 区間になる非決定性)
+    {
+        XFireConfig bcfg;
+        Config::ApplyDefaults(bcfg);
+        bcfg.onMs = 50; bcfg.offMs = 50; bcfg.firstOnMs = 0;
+        bcfg.triggerThreshold = 128; bcfg.hysteresisLow = 64;
+        bcfg.toggleButtons = XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A; // LB|A でトグル
+        bcfg.announceEnabled = false;
+        bcfg.targetButtons = 0;
+        bcfg.buttonTargetButtons = XINPUT_GAMEPAD_A;
+        bcfg.buttonFirstOnMs = 500; bcfg.buttonOnMs = 50; bcfg.buttonOffMs = 50;
+        Config::SetForTest(bcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: A 押下(トリガなし) -> ボタン単独 初回ON(0-500)
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s0);
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T42: t=0 button first ON");
+
+        // t=510: FirstOnMs(500)経過 -> OFF(500-550)
+        XFireEngine::SetTestClockNowMs(510.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_A) == 0, "T42b: t=510 OFF (phase=500-550)");
+
+        // t=515: LB+A コンボ立ち上がり -> マスター OFF(このフレームは素通し)
+        XFireEngine::SetTestClockNowMs(515.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s2);
+
+        // t=520: A 押下・マスターOFF -> 素通し(A 物理押下のまま・連射しない)
+        XFireEngine::SetTestClockNowMs(520.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s3);
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T42c-pre: master OFF -> A physical (no button-only)");
+
+        // t=525: 再び LB+A コンボ立ち上がり -> マスター ON(このフレームは素通し)
+        XFireEngine::SetTestClockNowMs(525.0);
+        XINPUT_STATE s4 = MakeState(XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s4);
+
+        // t=540: A 押下(トリガなし)・マスターON -> 修正後は bStarted リセット済みで
+        //        新たに FirstOnMs(500) から再開(540-1040) -> A 押下。
+        //        修正前は bStarted が残存し古い位相(500基準・OFF区間)で catch-up され A が離れる。
+        XFireEngine::SetTestClockNowMs(540.0);
+        XINPUT_STATE s5 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s5);
+        Check((s5.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T42c: t=540 re-ON restarts button first ON (phase reset on master OFF)");
+
+        // t=640: 540 基準でまだ FirstOnMs(500) 内 -> A 押下維持(OnMs=50 サイクルなら既にOFF)
+        XFireEngine::SetTestClockNowMs(640.0);
+        XINPUT_STATE s6 = MakeState(XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s6);
+        Check((s6.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T42d: t=640 still first ON (re-anchored to 540)");
+
+        XFireEngine::SetMasterEnabled(true);
+        Config::SetForTest(cfg);
     }
 
     // 後続テストのためにメイン設定を復元(Config テストが g_cfg を書き換えたため)
