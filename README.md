@@ -47,9 +47,9 @@ game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
 >
 > | Xbox | PS | XInput API |
 > |---|---|---|
-> | LT / RT | L2 / R2 | `bLeftTrigger` / `bRightTrigger`（連射発動トリガ・アナログ） |
-> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER`（デジタル肩） |
-> | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y`（顔ボタン・位置対応） |
+> | LT / RT | L2 / R2 | `bLeftTrigger` / `bRightTrigger` |
+> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER` |
+> | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y` |
 
 ## 設定ファイル (XInputXFire.ini)
 
@@ -89,7 +89,7 @@ TargetButtons=A
 
 `TargetButtons` / `ToggleButtons` 対応名: `DPAD_UP` `DPAD_DOWN` `DPAD_LEFT` `DPAD_RIGHT` `A` `B` `X` `Y` `LB` `RB` `START` `BACK` `LSB` `RSB`（`|` 区切り）
 
-## プロキシDLLビルド
+## プロキシDLLビルド（開発者向け）
 
 要 Visual Studio Build Tools 2022 (C++ workload)。CMake・MSBuild は Build Tools 2022 に同梱されていますが、通常のシェル(cmd / PowerShell / Git Bash 等)では **PATH に含まれない**ため、そのまま `cmake` を打つと見つかりません。**「Developer Command Prompt for VS 2022」**を起動してそこから実行してください（同梱の CMake・MSBuild にパスが通ります）。
 
