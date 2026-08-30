@@ -39,10 +39,10 @@ void Config::LoadOnce() {
             // 数値項目は文字列で読み wcstol で解析:空(キー不在/空)=既定、非数値=既定+ログ、
             // 範囲外=クランプ+ログ。従来は GetPrivateProfileIntW で非数値/空が 0 -> クランプ最小に
             // 黙って変換されユーザ意図が消失していた(TriggerThreshold= 空が即トリガ発動等)。
-            auto readClampedDw = [sec, &ini](const wchar_t* key, const char* label,
-                                            DWORD defv, INT lo, INT hi) -> DWORD {
+            auto readClampedDw = [&ini](const wchar_t* secName, const wchar_t* key, const char* label,
+                                        DWORD defv, INT lo, INT hi) -> DWORD {
                 wchar_t buf[64] = {0};
-                GetPrivateProfileStringW(sec, key, L"", buf, 64, ini.c_str());
+                GetPrivateProfileStringW(secName, key, L"", buf, 64, ini.c_str());
                 if (buf[0] == L'\0') return defv; // キー不在/空 -> 既定
                 wchar_t* end = nullptr;
                 long v = wcstol(buf, &end, 10);
@@ -65,15 +65,15 @@ void Config::LoadOnce() {
                 }
                 return (DWORD)v;
             };
-            auto readClampedByte = [&](const wchar_t* key, const char* label, BYTE defv) -> BYTE {
-                return (BYTE)readClampedDw(key, label, defv, 0, (INT)Config::kByteMax);
+            auto readClampedByte = [&readClampedDw](const wchar_t* secName, const wchar_t* key, const char* label, BYTE defv) -> BYTE {
+                return (BYTE)readClampedDw(secName, key, label, defv, 0, (INT)Config::kByteMax);
             };
             // bool 項目:1/0/true/false/yes/no/on/off を受理。空(キー不在/空)=既定、
             // 不明値=既定+ログ。従来は GetPrivateProfileIntW で "true"/"yes" 等が 0(無効)に黙って変換
             // されていた(EnableLT=true で LT 連射が黙って OFF になる等)。
-            auto readBool = [sec, &ini](const wchar_t* key, const char* label, bool defv) -> bool {
+            auto readBool = [&ini](const wchar_t* secName, const wchar_t* key, const char* label, bool defv) -> bool {
                 wchar_t b[32] = {0};
-                GetPrivateProfileStringW(sec, key, L"", b, 32, ini.c_str());
+                GetPrivateProfileStringW(secName, key, L"", b, 32, ini.c_str());
                 if (b[0] == L'\0') return defv;
                 if (_wcsicmp(b, L"1") == 0 || _wcsicmp(b, L"true") == 0
                     || _wcsicmp(b, L"yes") == 0 || _wcsicmp(b, L"on") == 0) return true;
@@ -84,15 +84,15 @@ void Config::LoadOnce() {
                 DiagLog::Log(msg);
                 return defv;
             };
-            g_cfg.onMs             = readClampedDw(L"OnMs",            "OnMs",            g_cfg.onMs,             (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
-            g_cfg.offMs            = readClampedDw(L"OffMs",           "OffMs",           g_cfg.offMs,            (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.onMs             = readClampedDw(sec, L"OnMs",            "OnMs",            g_cfg.onMs,             (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.offMs            = readClampedDw(sec, L"OffMs",           "OffMs",           g_cfg.offMs,            (INT)Config::kOnMsMin, (INT)Config::kOnMsMax);
             // FirstOnMs は 0=無効を許可([kFirstOnMsMin,kOnMsMax])。0 のとき最初のON区間は OnMs と同値。
-            g_cfg.firstOnMs        = readClampedDw(L"FirstOnMs",       "FirstOnMs",       g_cfg.firstOnMs,        (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
-            g_cfg.triggerThreshold = readClampedByte(L"TriggerThreshold", "TriggerThreshold", g_cfg.triggerThreshold);
-            g_cfg.hysteresisLow    = readClampedByte(L"HysteresisLow",    "HysteresisLow",    g_cfg.hysteresisLow);
+            g_cfg.firstOnMs        = readClampedDw(sec, L"FirstOnMs",       "FirstOnMs",       g_cfg.firstOnMs,        (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.triggerThreshold = readClampedByte(sec, L"TriggerThreshold", "TriggerThreshold", g_cfg.triggerThreshold);
+            g_cfg.hysteresisLow    = readClampedByte(sec, L"HysteresisLow",    "HysteresisLow",    g_cfg.hysteresisLow);
             // EnableLT/RT は 1/0/true/false/yes/no/on/off で記録(不明値=既定+ログ)。
-            g_cfg.enableLT         = readBool(L"EnableLT", "EnableLT", g_cfg.enableLT);
-            g_cfg.enableRT         = readBool(L"EnableRT", "EnableRT", g_cfg.enableRT);
+            g_cfg.enableLT         = readBool(sec, L"EnableLT", "EnableLT", g_cfg.enableLT);
+            g_cfg.enableRT         = readBool(sec, L"EnableRT", "EnableRT", g_cfg.enableRT);
             // 廃止キー(EnableL2/EnableR2)の検出: クリーンブレイクで値は読まないが、
             // 移行時にユーザの意図が黙って反転(無効化->既定true=有効化)するのを防ぐため存在を警告する。
             struct LegacyKey { const wchar_t* oldName; const wchar_t* newName; };
@@ -133,10 +133,26 @@ void Config::LoadOnce() {
                 if (tparsed != 0) g_cfg.toggleButtons = tparsed;
                 // 全トークン不明(tparsed=0)は既定維持(既定のトグルコンボが有効なまま)。
             }
-            g_cfg.defaultEnabled  = readBool(L"DefaultEnabled",  "DefaultEnabled",  g_cfg.defaultEnabled);
-            g_cfg.announceEnabled = readBool(L"AnnounceEnabled", "AnnounceEnabled", g_cfg.announceEnabled);
+            g_cfg.defaultEnabled  = readBool(sec, L"DefaultEnabled",  "DefaultEnabled",  g_cfg.defaultEnabled);
+            g_cfg.announceEnabled = readBool(sec, L"AnnounceEnabled", "AnnounceEnabled", g_cfg.announceEnabled);
             // 起動音(1/0 または true/false)。DLL 埋め込み WAVE リソースを PlaySound で再生。
-            g_cfg.startupSound    = readBool(L"StartupSound",    "StartupSound",    g_cfg.startupSound);
+            g_cfg.startupSound    = readBool(sec, L"StartupSound",    "StartupSound",    g_cfg.startupSound);
+
+            // --- [RapidFire] ボタン単独連射(トリガ不要・第2位相クロック) ---
+            // [XFire] と同名キーだが別セクション。ラベルに "RapidFire." 接頭辞でログ識別。
+            const wchar_t* rsec = L"RapidFire";
+            g_cfg.buttonFirstOnMs = readClampedDw(rsec, L"FirstOnMs", "RapidFire.FirstOnMs", g_cfg.buttonFirstOnMs, (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
+            g_cfg.buttonOnMs      = readClampedDw(rsec, L"OnMs",      "RapidFire.OnMs",    g_cfg.buttonOnMs,      (INT)Config::kOnMsMin,    (INT)Config::kOnMsMax);
+            g_cfg.buttonOffMs     = readClampedDw(rsec, L"OffMs",     "RapidFire.OffMs",   g_cfg.buttonOffMs,     (INT)Config::kOnMsMin,    (INT)Config::kOnMsMax);
+            {
+                wchar_t rbuf[256] = {0};
+                GetPrivateProfileStringW(rsec, L"TargetButtons", L"", rbuf, 256, ini.c_str());
+                int runk = 0;
+                WORD rparsed = InputTransform::ParseTargetButtons(rbuf, &runk);
+                if (runk > 0) DiagLog::Log("[CONFIG] RapidFire.TargetButtons: unknown token(s) ignored");
+                // 空指定(0)はデフォルト維持([XFire] TargetButtons と同じ挙動で統一)。
+                if (rparsed != 0) g_cfg.buttonTargetButtons = rparsed;
+            }
         }
         g_loaded.store(1, std::memory_order_release); // g_cfg 書き込み完了を可視化
     }

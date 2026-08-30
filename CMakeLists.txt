@@ -1,6 +1,6 @@
 # XInputXFire Proxy DLL
 cmake_minimum_required(VERSION 3.20)
-project(XInputXFireProxy LANGUAGES CXX VERSION 1.0.1)
+project(XInputXFireProxy LANGUAGES CXX VERSION 1.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -97,3 +97,21 @@ if(MSVC)
     target_compile_options(test_harness PRIVATE /utf-8)
 endif()
 # 実行時にプロキシDLLを同フォルダに xinput1_3.dll として配置して実行する
+
+# ---- クリーンアップ(ビルド成果物 + POST_BUILD の staging コピーを一括削除) ----
+# 標準 clean ターゲットは CMake 追跡分(ターゲット本体の出力)のみ削除し、
+# POST_BUILD でコピーした XInput9_1_0_*.dll / xinput1_3.dll / XInputXFire.ini が
+# 残留する。これらも含めて消すため rm -rf ではなく cmake -E のポータブル
+# コマンドで安全に削除する。
+# なお VS マルチコンフィグでは clean に --config を渡さないと現行コンフィグの
+# 成果物が消えないため $<CONFIG> で伝播する。
+# 使い方: cmake --build build --target clean-all --config Release
+add_custom_target(clean-all
+    COMMAND ${CMAKE_COMMAND} --build . --target clean --config $<CONFIG>
+    COMMAND ${CMAKE_COMMAND} -E rm -rf
+            "$<TARGET_FILE_DIR:XInputProxy>/XInput9_1_0_${_XF_BIT}.dll"
+            "$<TARGET_FILE_DIR:XInputProxy>/xinput1_3.dll"
+            "$<TARGET_FILE_DIR:XInputProxy>/XInputXFire.ini"
+    COMMENT "Cleaning build outputs and POST_BUILD staging copies"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)

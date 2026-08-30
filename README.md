@@ -1,6 +1,9 @@
 # XInputXFire Proxy DLL
 
-Xboxコントローラ(XInput)の **RT または LT トリガーを押している間だけ、方向キー(DPAD)と ABXY ボタンを連射** するツール。XInput Plus のプロキシDLL方式を参考に自作。
+Xboxコントローラ(XInput)で **連射** するツール。XInput Plus のプロキシDLL方式を参考に自作。2つの連射モードを搭載:
+
+- **トリガ連射モード(`[XFire]`)**: **RT または LT トリガーを押している間だけ**、方向キー(DPAD)と ABXY ボタンを連射。
+- **ボタン単独連射モード(`[RapidFire]`)**: トリガ不要で、対象ボタンを**押しっぱなしで連射**（決定ボタン連打用途など）。
 
 ## 動作方式（プロキシDLL方式）
 
@@ -29,20 +32,31 @@ game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
 - **トリガ透過**: LT/RT のアナログ値はゲームへそのまま伝達（連射は DPAD/ABXY のみに作用）。
 - **物理押下のみ連射**: 物理的に押されている対象ボタンだけ連射。離せば停止。
 
+### ボタン単独連射モード（`[RapidFire]`・v1.1.0）
+
+トリガ(LT/RT)を押さず、対象ボタンを**押しっぱなしで連射**する第2モード。XFire マスター有効時のみ動作（マスター切替はトリガモードと共通）。決定ボタン(A)連打用途などを想定。
+
+- **発動条件**: XFire マスター ON のとき、`[RapidFire]` の TargetButtons に含まれるボタンを物理押下中。
+- **周期**: トリガモードとは独立した第2位相クロック（`[RapidFire]` の `FirstOnMs`/`OnMs`/`OffMs`）。QPC 高精度タイマベースでポーリング間隔に依存しない。
+- **重複解決（トリガ優先・他は独立）**: 両モードの TargetButtons に入っているボタンは、**トリガ押下中はトリガモード**が駆動し、**トリガ非押下時はボタン単独モード**が駆動する。
+  - トリガリストのみのボタン → トリガ押下中のみ連射。
+  - ボタン単独リストのみのボタン → トリガ状態に関わらず常時連射。
+- **マスター OFF で両モード位相リセット**: マスタートグルが ON→OFF されると両モードの位相クロックがリセットされ、OFF→ON 後の次回押下で FirstOnMs から再開する。
+
 > **ボタン名対応**: 本ツールは XInput(Xbox API) ベースのため Xbox 名を基本表記します。PS コントローラでの呼び名との対応は以下の通り。
 >
 > | Xbox | PS | XInput API |
 > |---|---|---|
-> | LT / RT | L2 / R2 | `bLeftTrigger` / `bRightTrigger`（連射発動トリガ・アナログ） |
-> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER`（デジタル肩） |
-> | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y`（顔ボタン・位置対応） |
+> | LT / RT | L2 / R2 | `bLeftTrigger` / `bRightTrigger` |
+> | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER` |
+> | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y` |
 
 ## 設定ファイル (XInputXFire.ini)
 
 ゲームexeと同フォルダに配置。無い場合はデフォルト値を使用。
 
 ```ini
-; XInputXFire v1.0.1
+; XInputXFire v1.1.0
 [XFire]
 OnMs=50
 OffMs=50
@@ -61,11 +75,21 @@ DefaultEnabled=0
 AnnounceEnabled=1
 ; 起動音(1=再生 / 0=無効・既定1)。DLL 埋め込み WAVE リソースを再生しプロキシロード完了を通知。
 StartupSound=1
+
+; ボタン単独連射(トリガ不要)。[XFire] とは別設定(独立第2位相クロック)。既定 A(決定連打用途)。
+; 両リストにあるボタンは「トリガ優先」(トリガ押下中=[XFire] 駆動 / 非押下=下記駆動)。
+[RapidFire]
+; 押下直後の最初のON区間(ms・0=無効=OnMsと同値・既定500)。[XFire] の FirstOnMs とは別値。
+FirstOnMs=500
+OnMs=50
+OffMs=50
+; 連射対象ボタン(|区切り・既定 A)。対応名は [XFire] TargetButtons と同じ。
+TargetButtons=A
 ```
 
 `TargetButtons` / `ToggleButtons` 対応名: `DPAD_UP` `DPAD_DOWN` `DPAD_LEFT` `DPAD_RIGHT` `A` `B` `X` `Y` `LB` `RB` `START` `BACK` `LSB` `RSB`（`|` 区切り）
 
-## プロキシDLLビルド
+## プロキシDLLビルド（開発者向け）
 
 要 Visual Studio Build Tools 2022 (C++ workload)。CMake・MSBuild は Build Tools 2022 に同梱されていますが、通常のシェル(cmd / PowerShell / Git Bash 等)では **PATH に含まれない**ため、そのまま `cmake` を打つと見つかりません。**「Developer Command Prompt for VS 2022」**を起動してそこから実行してください（同梱の CMake・MSBuild にパスが通ります）。
 
@@ -98,7 +122,7 @@ ctest --test-dir build-x64 --output-on-failure
 
 ## 検証
 
-1. **単体テスト** (`xfire_unit`): モックQPC時刻注入で連射ロジック(ON/OFF周期・ヒステリシス・トリガ透過・対象外保護・4コントローラ独立)を検証。コントローラ不要。
+1. **単体テスト** (`xfire_unit`): モックQPC時刻注入で連射ロジック(ON/OFF周期・ヒステリシス・トリガ透過・対象外保護・4コントローラ独立・ボタン単独連射・2モード重複解決・マスタートグル時の位相リセット)を検証。コントローラ不要。
 2. **テストハーネス** (`test_harness`): プロキシDLLを同フォルダに `xinput1_3.dll` として配置し実行。実コントローラの RT 押下中に対象ボタンが周期トグルするか CSV ログで確認（60秒）。
    - **Smart App Control(SAC) 有効環境では test_harness.exe が起動できない場合があります**。SAC は未署名かつ Microsoft クラウドに実績のない新規バイナリを「未確認」としてブロックし（パスベースではないため Program Files 等へのコピーでも回避不可）、ユーザ側の例外設定もありません。イベントログ `Microsoft-Windows-CodeIntegrity/Operational` の ID 3118/3033 で「Smart App Control Block」を確認できます。
    - なお**本番のプロキシDLLは SAC 下でもブロックされません**（署名済みゲーム exe が LoadLibrary で読み込む DLL は許容されるため）。SAC に引っかかるのは test_harness 等の**独立未署名 exe のみ**です。test_harness が起動できない場合は、SAC オフの別PC/VM で検証するか、本番ゲーム経路で実機確認してください。
