@@ -1,49 +1,53 @@
 # XInputXFire Proxy DLL
 
-Xboxコントローラ(XInput)で **連射** するツール。XInput Plus のプロキシDLL方式を参考に自作。2つの連射モードを搭載:
+English | [日本語 (Japanese)](README.ja.md)
 
-- **トリガ連射モード(`[XFire]`)**: **RT または LT トリガーを押している間だけ**、方向キー(DPAD)と ABXY ボタンを連射。
-- **ボタン単独連射モード(`[RapidFire]`)**: トリガ不要で、対象ボタンを**押しっぱなしで連射**（決定ボタン連打用途など）。
+**Turbo fire (rapid-fire) for Xbox controllers (XInput) on Windows, as a drop-in proxy DLL.** No resident background app, no driver install. Modeled after XInput Plus's proxy-DLL approach, built from scratch. Two rapid-fire modes:
 
-## 動作方式（プロキシDLL方式）
+- **Trigger mode (`[XFire]`)**: While **RT or LT is held**, the D-pad and A/B/X/Y buttons rapid-fire.
+- **Button-only mode (`[RapidFire]`)**: No trigger needed — **holding a target button** rapid-fires it (e.g. auto-mashing the confirm button).
 
-対象ゲームの exe と同じフォルダにプロキシDLL(`xinput1_3.dll`)と設定(`XInputXFire.ini`)を配置すると、OSのDLL検索順序でローカルDLLが優先ロードされ XInput API 呼び出しを横取りします。本物システムDLLを動的ロードして転送しつつ、`XInputGetState` の戻り値の DPAD/ABXY ビットを周期ON/OFFで改変してゲームへ返します。**常駐不要**。
+> **Download**: prebuilt DLLs (x86/x64) and a sample `XInputXFire.ini` are on the [Releases](https://github.com/mayaqf/XInputXFire/releases) page — no need to build from source.
+
+## How it works (proxy DLL)
+
+Place the proxy DLL (`xinput1_3.dll`) and the config (`XInputXFire.ini`) in the same folder as the target game's exe. Windows' DLL search order loads the local DLL first, so XInput API calls are intercepted. The proxy forwards everything to the genuine system DLL (loaded dynamically), while rewriting the D-pad/A/B/X/Y bits of the `XInputGetState` result with a periodic on/off pattern before returning them to the game. **No resident process required.**
 
 ```
-game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
-                              │ 初回呼出で遅延Init(本物DLLロード+ini読込)
+game.exe ─(implicit DLL resolution)─▶ local xinput1_3.dll [proxy]
+                              │ lazy init on first call (load genuine DLL + read ini)
                               ▼
-                          本物 System32\xinput1_3.dll (or 1_4) に転送 → 生state取得
+        genuine System32\xinput1_3.dll (or 1_4) → raw state
                               ▼
-                          連射エンジン: LT/RT判定 → QPC周期 → DPAD/ABXY 改変
-                              ▼ (トリガ値は触らない)
-                          ゲームへ改変後 state を返す
+    rapid-fire engine: LT/RT check → QPC clock → rewrite DPAD/ABXY
+                              ▼ (trigger values untouched)
+                  modified state returned to the game
 ```
 
-## 機能（連射ロジック）
+## Features (rapid-fire logic)
 
-- **マスター切替(LB+A)**: 連射機能の有効/無効を **LB+A 同時押し(PS名 L1+×)** の立ち上がりでトグル。**起動時は OFF**（メニュー操作中の誤動作を防ぐため）。OFF 中は LT/RT を押しても連射せず入力をそのまま通す。
-- **発動条件**: LT または RT が押下閾値(既定150/255)以上。いずれかで発動。マスター ON のときのみ有効。
-- **連射対象**: DPAD(上下左右) + ABXY（ini で個別指定可）。
-- **周期**: QPC 高精度タイマベース。ON区間(既定50ms)=ボタン押下、OFF区間(既定50ms)=ボタン離。ポーリング間隔(60/120Hz等)に依存しない。
-- **初回ON区間(FirstOnMs)**: 対象ボタン押下直後の最初のON区間だけ専用の長さを指定(既定200ms・0=無効=OnMsと同値)。位相クロックは対象ボタン押下基準で、ボタンを離すとリセットされ次回押下で再びFirstOnMsから。`FirstOnMs` を大きくすれば連射ON中でも「1回だけボタンを押す」がコントロール可能(長い初回ONの間に離せば1回押下で確定)。
-- **ヒステリシス**: 押下閾値150 / 離上閾値140 で、トリガが閾値付近でチャタリングしても連射が暴走しない。
-- **4コントローラ独立**: dwUserIndex 0-3 各々独立状態。
-- **トリガ透過**: LT/RT のアナログ値はゲームへそのまま伝達（連射は DPAD/ABXY のみに作用）。
-- **物理押下のみ連射**: 物理的に押されている対象ボタンだけ連射。離せば停止。
+- **Master toggle (LB+A)**: rapid fire is toggled by pressing **LB+A together (PS: L1+×)**; it switches on the press edge. **Starts OFF** (prevents accidental firing while navigating menus). While OFF, LT/RT inputs pass through untouched.
+- **Activation**: LT or RT at/above the press threshold (default 150/255). Either trigger activates. Only while the master is ON.
+- **Targets**: D-pad (all four) + A/B/X/Y (individually selectable via ini).
+- **Timing**: QPC high-resolution timer. ON window (default 50 ms) = button pressed, OFF window (default 50 ms) = button released. Independent of the game's polling rate (60/120 Hz, etc.).
+- **First ON window (`FirstOnMs`)**: only the first ON window right after a target button is pressed can use its own length (default 200 ms; 0 = disabled = same as `OnMs`). The phase clock is referenced to the target button press and resets when the button is released, so the next press starts from `FirstOnMs` again. Making `FirstOnMs` large lets you land a **single press** even while turbo is enabled (release during the long first ON window).
+- **Hysteresis**: press threshold 150 / release threshold 140, so trigger chatter near the threshold can't send the turbo into a runaway.
+- **4 controllers, independent**: `dwUserIndex` 0–3 each keep their own state.
+- **Trigger passthrough**: LT/RT analog values reach the game untouched (turbo only affects D-pad/ABXY).
+- **Only physically-held buttons fire**: turbo applies only to target buttons you are physically holding. Release to stop.
 
-### ボタン単独連射モード（`[RapidFire]`・v1.1.0）
+### Button-only rapid fire mode (`[RapidFire]`, v1.1.0)
 
-トリガ(LT/RT)を押さず、対象ボタンを**押しっぱなしで連射**する第2モード。XFire マスター有効時のみ動作（マスター切替はトリガモードと共通）。決定ボタン(A)連打用途などを想定。
+A second mode that rapid-fires while a target button is **held down**, without touching the triggers. Active only while the XFire master is enabled (the master toggle is shared with trigger mode). Intended for auto-mashing the confirm button (A), etc.
 
-- **発動条件**: XFire マスター ON のとき、`[RapidFire]` の TargetButtons に含まれるボタンを物理押下中。
-- **周期**: トリガモードとは独立した第2位相クロック（`[RapidFire]` の `FirstOnMs`/`OnMs`/`OffMs`）。QPC 高精度タイマベースでポーリング間隔に依存しない。
-- **重複解決（トリガ優先・他は独立）**: 両モードの TargetButtons に入っているボタンは、**トリガ押下中はトリガモード**が駆動し、**トリガ非押下時はボタン単独モード**が駆動する。
-  - トリガリストのみのボタン → トリガ押下中のみ連射。
-  - ボタン単独リストのみのボタン → トリガ状態に関わらず常時連射。
-- **マスター OFF で両モード位相リセット**: マスタートグルが ON→OFF されると両モードの位相クロックがリセットされ、OFF→ON 後の次回押下で FirstOnMs から再開する。
+- **Activation**: while the XFire master is ON and a button listed in `[RapidFire]` → `TargetButtons` is physically held.
+- **Timing**: an independent second phase clock (`[RapidFire]`'s `FirstOnMs`/`OnMs`/`OffMs`), QPC-based, polling-rate independent.
+- **Overlap resolution (trigger takes priority; others independent)**: a button present in both modes' `TargetButtons` is driven by **trigger mode while a trigger is held**, and by **button-only mode when no trigger is held**.
+  - Buttons only in the trigger list → fire only while a trigger is held.
+  - Buttons only in the button-only list → fire regardless of trigger state.
+- **Master OFF resets both phase clocks**: when the master toggle goes ON→OFF, both modes' phase clocks reset; after OFF→ON, the next press starts from `FirstOnMs`.
 
-> **ボタン名対応**: 本ツールは XInput(Xbox API) ベースのため Xbox 名を基本表記します。PS コントローラでの呼び名との対応は以下の通り。
+> **Button names**: this tool is built on the XInput (Xbox) API, so Xbox names are the primary notation. Equivalent names on a PlayStation controller:
 >
 > | Xbox | PS | XInput API |
 > |---|---|---|
@@ -51,120 +55,122 @@ game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
 > | LB / RB | L1 / R1 | `XINPUT_GAMEPAD_LEFT_SHOULDER` / `XINPUT_GAMEPAD_RIGHT_SHOULDER` |
 > | A / B / X / Y | × / ○ / □ / △ | `XINPUT_GAMEPAD_A/B/X/Y` |
 
-## 設定ファイル (XInputXFire.ini)
+## Configuration file (XInputXFire.ini)
 
-ゲームexeと同フォルダに配置。無い場合はデフォルト値を使用。
+Place it next to the game exe. If missing, defaults are used.
 
 ```ini
 ; XInputXFire v1.1.0
 [XFire]
 OnMs=50
 OffMs=50
-; 押下直後の最初のON区間(ms・0=無効=OnMsと同値・既定200)。大きくすれば連射ON中でも1回だけ押せる。
+; First ON window right after a press (ms; 0 = disabled = same as OnMs; default 200).
+; Set it large to allow a single press even while turbo is enabled.
 FirstOnMs=200
 TriggerThreshold=150
 HysteresisLow=140
 TargetButtons=DPAD_UP|DPAD_DOWN|DPAD_LEFT|DPAD_RIGHT|A|B|X|Y
 EnableLT=1
 EnableRT=1
-; 連射マスター切替コンボ(|区切り・既定 LB|A=PS名 L1+A)。全キー同時押しの立ち上がりで ON/OFF 切替。空で無効(常時ON運用)。
+; Master toggle combo (| separated; default LB|A = PS L1+A). Toggles on the press of all keys together. Empty = disabled (always-on).
 ToggleButtons=LB|A
-; 起動時のマスター状態(1=ON / 0=OFF・既定0=OFF)。OFF中は連射せず素通し(メニュー操作安全)。
+; Master state at startup (1 = ON / 0 = OFF; default 0 = OFF). While OFF, inputs pass through untouched (menu-safe).
 DefaultEnabled=0
-; トグル切替時の音声アナウンス(1=有効 / 0=無効・既定1)。SAPI で "Enabled/Disabled cross fire." を再生。
+; Voice announcement on toggle (1 = on / 0 = off; default 1). Plays "Enabled/Disabled cross fire." via SAPI.
 AnnounceEnabled=1
-; 起動音(1=再生 / 0=無効・既定1)。DLL 埋め込み WAVE リソースを再生しプロキシロード完了を通知。
+; Startup sound (1 = play / 0 = mute; default 1). Plays a WAVE resource embedded in the DLL to confirm the proxy loaded.
 StartupSound=1
 
-; ボタン単独連射(トリガ不要)。[XFire] とは別設定(独立第2位相クロック)。既定 A(決定連打用途)。
-; 両リストにあるボタンは「トリガ優先」(トリガ押下中=[XFire] 駆動 / 非押下=下記駆動)。
+; Button-only rapid fire (no trigger). Separate settings from [XFire] (independent 2nd phase clock). Default: A (confirm mash).
+; A button in both lists is "trigger-first" (trigger held = [XFire] drives it / not held = the section below drives it).
 [RapidFire]
-; 押下直後の最初のON区間(ms・0=無効=OnMsと同値・既定500)。[XFire] の FirstOnMs とは別値。
+; First ON window right after a press (ms; 0 = disabled = same as OnMs; default 500). Separate from [XFire]'s FirstOnMs.
 FirstOnMs=500
 OnMs=50
 OffMs=50
-; 連射対象ボタン(|区切り・既定 A)。対応名は [XFire] TargetButtons と同じ。
+; Target buttons (| separated). Same names as [XFire] TargetButtons.
 TargetButtons=A
 ```
 
-`TargetButtons` / `ToggleButtons` 対応名: `DPAD_UP` `DPAD_DOWN` `DPAD_LEFT` `DPAD_RIGHT` `A` `B` `X` `Y` `LB` `RB` `START` `BACK` `LSB` `RSB`（`|` 区切り）
+Valid names for `TargetButtons` / `ToggleButtons`: `DPAD_UP` `DPAD_DOWN` `DPAD_LEFT` `DPAD_RIGHT` `A` `B` `X` `Y` `LB` `RB` `START` `BACK` `LSB` `RSB` (`|` separated)
 
-## プロキシDLLビルド（開発者向け）
+## Building the proxy DLL (for developers)
 
-要 Visual Studio Build Tools 2022 (C++ workload)。CMake・MSBuild は Build Tools 2022 に同梱されていますが、通常のシェル(cmd / PowerShell / Git Bash 等)では **PATH に含まれない**ため、そのまま `cmake` を打つと見つかりません。**「Developer Command Prompt for VS 2022」**を起動してそこから実行してください（同梱の CMake・MSBuild にパスが通ります）。
+Requires Visual Studio Build Tools 2022 (C++ workload). The bundled CMake/MSBuild are **not on PATH** in ordinary shells (cmd / PowerShell / Git Bash, etc.), so a bare `cmake` won't be found. Launch a **"Developer Command Prompt for VS 2022"** and run from there (that puts the bundled CMake/MSBuild on PATH).
 
 ```bash
-# 32bit
+# 32-bit
 cmake -S . -B build-x86 -A Win32
 cmake --build build-x86 --config Release
-# 64bit
+# 64-bit
 cmake -S . -B build-x64 -A x64
 cmake --build build-x64 --config Release
-# 単体テスト(コントローラ不要)
+# Unit tests (no controller needed)
 cmake --build build-x64 --config Release --target xfire_unit
 ctest --test-dir build-x64 --output-on-failure
 ```
 
-成果物:
-- `build-x86/Release/xinput1_3_x86.dll`, `xinput1_3.dll` (`xinput1_3_x86.dll` のリネーム版)
-- `build-x64/Release/xinput1_3_x64.dll`, `xinput1_3.dll` (`xinput1_3_x64.dll` のリネーム版)
+Artifacts:
+- `build-x86/Release/xinput1_3_x86.dll`, `xinput1_3.dll` (a renamed copy of the x86 DLL)
+- `build-x64/Release/xinput1_3_x64.dll`, `xinput1_3.dll` (a renamed copy of the x64 DLL)
 - `xfire_unit.exe`, `test_harness.exe`
 
-## 配置（手動）
+## Installation (manual)
 
-1. 対象ゲームのビット(32/64)に合うプロキシDLLを、ゲームが使う XInput DLL 名にしてゲームexeと同フォルダへ。
-   - 1.3 形態（某14等）: `xinput1_3.dll` を**そのまま配置**。
-   - 9.1.0 形態: `XInput9_1_0_x64.dll` / `XInput9_1_0_x86.dll` を `XInput9_1_0.dll` にリネームして配置。
-   - 1.4 形態: `xinput1_3_x64.dll` / `xinput1_3_x86.dll` を `xinput1_4.dll` にリネームして配置。
-   - **プロキシDLLはゲームexeと同フォルダにのみ配置してください。`C:\Windows\System32` / `SysWOW64` には置かないでください**（プロキシ自身が本物DLLと同名で同フォルダに置かれると、自己再ロードによる無限再帰を起こす可能性があります）。
-2. `XInputXFire.ini` を同フォルダへ。
-3. ゲームを通常起動（常駐不要）。
+1. Copy the proxy DLL matching the game's bitness (32/64) next to the game exe, renamed to the XInput DLL name the game imports:
+   - 1.3-style games: place `xinput1_3.dll` **as-is**.
+   - 9.1.0-style: rename `XInput9_1_0_x64.dll` / `XInput9_1_0_x86.dll` to `XInput9_1_0.dll`.
+   - 1.4-style: rename `xinput1_3_x64.dll` / `xinput1_3_x86.dll` to `xinput1_4.dll`.
+   - **Place the proxy DLL only in the game exe's folder. Never put it in `C:\Windows\System32` / `SysWOW64`** (placing the proxy in the system folder under the genuine DLL's own name can cause infinite recursion via self-reload).
+2. Put `XInputXFire.ini` in the same folder.
+3. Launch the game normally (no resident app needed).
 
-## 検証
+## Verification
 
-1. **単体テスト** (`xfire_unit`): モックQPC時刻注入で連射ロジック(ON/OFF周期・ヒステリシス・トリガ透過・対象外保護・4コントローラ独立・ボタン単独連射・2モード重複解決・マスタートグル時の位相リセット)を検証。コントローラ不要。
-2. **テストハーネス** (`test_harness`): プロキシDLLを同フォルダに `xinput1_3.dll` として配置し実行。実コントローラの RT 押下中に対象ボタンが周期トグルするか CSV ログで確認（60秒）。
-   - **Smart App Control(SAC) 有効環境では test_harness.exe が起動できない場合があります**。SAC は未署名かつ Microsoft クラウドに実績のない新規バイナリを「未確認」としてブロックし（パスベースではないため Program Files 等へのコピーでも回避不可）、ユーザ側の例外設定もありません。イベントログ `Microsoft-Windows-CodeIntegrity/Operational` の ID 3118/3033 で「Smart App Control Block」を確認できます。
-   - なお**本番のプロキシDLLは SAC 下でもブロックされません**（署名済みゲーム exe が LoadLibrary で読み込む DLL は許容されるため）。SAC に引っかかるのは test_harness 等の**独立未署名 exe のみ**です。test_harness が起動できない場合は、SAC オフの別PC/VM で検証するか、本番ゲーム経路で実機確認してください。
-3. **統合**: 許可されたオフラインゲームに配置し実動作確認。
+1. **Unit tests** (`xfire_unit`): verifies the rapid-fire logic with mock QPC time injection (ON/OFF periods, hysteresis, trigger passthrough, non-target protection, 4-controller independence, button-only mode, 2-mode overlap resolution, phase reset on master toggle). No controller needed.
+2. **Test harness** (`test_harness`): place the proxy DLL in its own folder as `xinput1_3.dll` and run it; a CSV log confirms whether target buttons toggle periodically while RT is physically held (60 s).
+   - **On systems with Smart App Control (SAC) enabled, test_harness.exe may fail to launch.** SAC blocks new unsigned binaries with no reputation in Microsoft's cloud as "unverified" (this is not path-based, so copying to Program Files doesn't help, and there is no user-side exception). Check event log `Microsoft-Windows-CodeIntegrity/Operational`, IDs 3118/3033, for "Smart App Control Block".
+   - The **production proxy DLL is not blocked under SAC** (a DLL loaded via LoadLibrary by a signed game exe is allowed). SAC only catches standalone unsigned exes like test_harness. If test_harness won't launch, verify on another PC/VM with SAC off, or test through a real game.
+3. **Integration**: place it in a permitted offline game and verify live behavior.
 
-## 対応ゲームの条件
+## Game compatibility
 
-本ツールは **XInput の `XInputGetState` でコントローラ入力を取得するゲーム** にのみ有効です。多くの XInput 対応ゲームが該当します。
+This tool only works with games that read controller input through **XInput's `XInputGetState`**. Most XInput-compatible games qualify.
 
-**非対応ケース（入力を XInput 経由で取得しないゲーム）:**
-- コントローラ入力を HID デバイスの直接読み取り（`SetupDi*` + `CreateFileW` + `ReadFile` + `HidP_*`）や RawInput で取得するゲームでは、プロキシDLLがロードされても `XInputGetState` が呼ばれないため連射できません。
-- このようなゲームでは **XInput Plus**（プロキシDLLを足場に Mhook で能動的に HID 経路をインラインフックする方式）などを使用してください。
-- ゲームが XInput 経由で入力を取るか不明な場合は、配置後にコントローラが無反応なら非対応の可能性があります。
+**Unsupported cases (games that don't read input via XInput):**
 
-**某14(dx11) について:** XInput 独自ラッパ（`XInputXIV3.dll`）経由で `XINPUT1_3.dll` を**序数(2,3,5)でインポート**して `XInputGetState` を呼ぶため、本ツールの XInput 経路改変で連射が動作します（実機確認済み）。配置は `xinput1_3.dll` **1本のみ**（`XInput9_1_0.dll` プロキシは置かない — 2本配置は同一プロセスに2プロキシがロードされ起動クラッシュする）。序数インポートに対応するため `.def` で正規序数(`@2`=`GetState` 等)を明示指定済みです。
+- Games that read controllers directly from HID (`SetupDi*` + `CreateFileW` + `ReadFile` + `HidP_*`) or via RawInput never call `XInputGetState`, so the proxy DLL loads but cannot turbo-fire.
+- For such games, use a tool that actively inline-hooks the HID path, such as **XInput Plus** (a proxy DLL plus Mhook-based hooking).
+- If you're unsure whether a game uses XInput: if the controller goes unresponsive after installing the proxy, the game is likely unsupported.
 
-## トラブルシューティング（診断ログ）
+**A certain "14" MMO (dx11 build):** it imports `XINPUT1_3.dll` **by ordinals (2, 3, 5)** through its own XInput wrapper (`XInputXIV3.dll`) to call `XInputGetState`, so this tool's XInput path works (verified on real hardware). Deployment is a **single** `xinput1_3.dll` (do not also place an `XInput9_1_0.dll` proxy — two proxies loaded into one process crash at startup). Ordinal imports are supported by explicitly pinned ordinals in `.def` (`@2` = `GetState`, etc.).
 
-コントローラが無反応・連射が効かない場合、プロキシDLLは起動時（初回エクスポート呼出時）の診断結果を **`%TEMP%\XInputXFire_xinput.log`** に1行ずつ追記します。このログで原因を切り分けられます。
+## Troubleshooting (diagnostic log)
 
-- `[STICKYINIT] version=<ビルドバージョン> LoadOnce=1 hDll=... GetState=...` → プロキシが正常にロードされ、本物DLLの関数ポインタを取得した（`version=` はビルドバージョン、`hDll=0000000000000000` なら本物DLLロード失敗）。
-- `[LOADER] ...` → 本物DLLのロード失敗・必須エクスポート欠落等（フォールバック先DLLの切り替え状況）。
-- `[CONFIG] ...` → ini の値が非数値・範囲外・不明トークンで既定値に置換された、または廃止キー（`EnableL2`/`EnableR2`）が検出された（意図しない挙動の原因特定に）。
-- `[XFIRE] QueryPerformanceFrequency returned 0 ...` → 高精度タイマ取得失敗（連射機能が無効化・パススルーのみ動作）。
+If the controller is unresponsive or turbo fire doesn't kick in, the proxy DLL writes its startup diagnostics (at the first export call) to **`%TEMP%\XInputXFire_xinput.log`**, one line at a time.
 
-**プレイ中はこのログは増えません**。診断行は起動時のみ書かれ、毎フレームの `XInputGetState` / 連射処理のホットパスはログを書きません（長時間プレイでも肥大化しません）。ログが `[STICKYINIT]` 1行だけで後が続かない場合はプロキシは正常に動いているので、コントローラ無反応は「ゲームが XInput 経由で入力を取得していない（非対応）」の可能性が高いです（→ [対応ゲームの条件](#対応ゲームの条件)）。
+- `[STICKYINIT] version=<build version> LoadOnce=1 hDll=... GetState=...` → the proxy loaded normally and obtained function pointers into the genuine DLL (`hDll=0000000000000000` means the genuine DLL failed to load).
+- `[LOADER] ...` → genuine DLL load failure, missing required exports, etc. (shows fallback DLL switching).
+- `[CONFIG] ...` → an ini value was non-numeric / out of range / an unknown token and was replaced with the default; or a removed key (`EnableL2`/`EnableR2`) was detected (useful for finding unintended behavior).
+- `[XFIRE] QueryPerformanceFrequency returned 0 ...` → high-resolution timer unavailable (rapid fire disabled; passthrough only).
 
-## ⚠️ 注意（自己責任）
+**The log does not grow while you play.** Diagnostic lines are written only at startup; the per-frame `XInputGetState` / rapid-fire hot path writes no log lines (no bloat on long sessions). If the log contains just one `[STICKYINIT]` line and nothing else, the proxy itself is working fine — an unresponsive controller then most likely means the game doesn't read input via XInput (unsupported) → see [Game compatibility](#game-compatibility).
 
-- プロキシDLL方式は XInput Plus / x360ce と同様に**アンチチートに検出される可能性**があります。**オンラインゲームでの使用は自己責任**です。
-- 設定不備でゲームが誤動作する場合があります。事前にテストハーネスで確認してください。
-- 本ツールは個人の学習・研究目的、および許可された環境での使用を想定しています。
+## ⚠️ Disclaimer (use at your own risk)
 
-## 設計のポイント
+- Like XInput Plus / x360ce, the proxy-DLL approach **can be detected by anti-cheat**. **Using it in online games is at your own risk.**
+- A misconfigured setup can make a game misbehave. Verify with the test harness beforehand.
+- This tool is intended for personal learning/research and use in permitted environments.
 
-- **DllMain で何もしない**: 本物DLLロード・ini読込・QPC初期化は初回エクスポート呼出時の遅延Initで行う。DllMain 内の LoadLibrary はローダーロックでデッドロックを起こすため（MS 公式 DLL Best Practices 準拠）。
-- **自己再ロード防止**: 本物DLLは `GetSystemDirectoryW` で System32(32bitプロセスはSysWOW64)の**フルパス**を構築してロードする。`LOAD_LIBRARY_SEARCH_SYSTEM32` だけでは、プロセスに既にロード済みの同名モジュール(プロキシ自身)が名前ベースで再利用され自己再帰するため不十分（実証済み）。フルパス指定なら正規化パスで既存モジュールを判定し、プロキシ自身と区別される。
-- **1.3→1.4 フォールバック**: `xinput1_3.dll` が無い環境(Win8+)では `xinput1_4.dll` を使用。
-- **xinput.lib 非リンク**: `xinput.h` を include せず構造体を自前定義。本物DLLとリンク衝突しない。
-- **エクスポート名固定**: `.def` で装飾無し名前を固定（x86 stdcall の装飾名問題回避）。
-- **CRT 静的リンク(`/MT`)**: DLL依存を最小化。
+## Design notes
 
-## ライセンス
+- **Do nothing in DllMain**: the genuine DLL load, ini read, and QPC init all happen in a lazy init at the first export call. `LoadLibrary` inside DllMain deadlocks on the loader lock (per Microsoft's official DLL Best Practices).
+- **Self-reload prevention**: the genuine DLL is loaded by building its **full path** with `GetSystemDirectoryW` (SysWOW64 for 32-bit processes). `LOAD_LIBRARY_SEARCH_SYSTEM32` alone is not enough: the same-named module already loaded into the process (the proxy itself) gets reused by name, causing self-recursion (verified). A full path is distinguished from the proxy by its normalized path.
+- **1.3→1.4 fallback**: on systems without `xinput1_3.dll` (Win8+), `xinput1_4.dll` is used.
+- **No linking against xinput.lib**: `xinput.h` is not included; the structures are defined locally. Avoids link conflicts with the genuine DLL.
+- **Fixed export names**: `.def` pins undecorated names (avoids the x86 stdcall decorated-name problem).
+- **Statically linked CRT (`/MT`)**: minimizes DLL dependencies.
 
-本プロジェクトのコードは **MIT License** で公開します。詳細は [LICENSE](LICENSE) を参照してください。
+## License
+
+This project's code is released under the **MIT License**. See [LICENSE](LICENSE) for details.
