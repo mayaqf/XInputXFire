@@ -60,7 +60,7 @@ game.exe ─(暗黙DLL解決)─▶ ローカル xinput1_3.dll [プロキシ]
 ゲームexeと同フォルダに配置。無い場合はデフォルト値を使用。
 
 ```ini
-; XInputXFire v1.1.0
+; XInputXFire v1.1.1
 [XFire]
 OnMs=50
 OffMs=50
