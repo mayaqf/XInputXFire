@@ -60,7 +60,7 @@ A second mode that rapid-fires while a target button is **held down**, without t
 Place it next to the game exe. If missing, defaults are used.
 
 ```ini
-; XInputXFire v1.1.0
+; XInputXFire v1.1.1
 [XFire]
 OnMs=50
 OffMs=50
