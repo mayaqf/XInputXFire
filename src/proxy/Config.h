@@ -8,6 +8,7 @@ struct XFireConfig {
     DWORD firstOnMs        = 200;  // 押下直後の最初のON区間(ms・0=無効=OnMsと同値・既定200)
     BYTE  triggerThreshold = 150;  // 押下判定閾値(0-255)
     BYTE  hysteresisLow    = 140;  // 離上判定閾値(ON->OFF)
+    DWORD triggerOffDelayMs = 50;  // トリガ解除遅延(ms・0=無効)。判定は HysteresisLow 未満で即解除し、解除後のゲームから見るトリガ押下のみこの間 ON 継続(Issue #10)
     WORD  targetButtons    = XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN
                           | XINPUT_GAMEPAD_DPAD_LEFT | XINPUT_GAMEPAD_DPAD_RIGHT
                           | XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B
@@ -34,8 +35,9 @@ namespace Config {
     // 値域ポリシー(クランプ範囲)。本ヘッダが唯一の定義源。
     // OnMs/OffMs は 0 禁止(=フェーズwhileループの暴走防止)。
     inline constexpr DWORD kOnMsMin      = 1;     // OnMs/OffMs 下限
-    inline constexpr DWORD kOnMsMax      = 10000; // OnMs/OffMs/FirstOnMs 上限
+    inline constexpr DWORD kOnMsMax      = 10000; // OnMs/OffMs/FirstOnMs/TriggerOffDelayMs 上限
     inline constexpr DWORD kFirstOnMsMin = 0;     // FirstOnMs 下限(0=無効=OnMsと同値)
+    inline constexpr DWORD kTriggerOffDelayMsMin = 0; // TriggerOffDelayMs 下限(0=無効=HysteresisLow未満で即解除)
     inline constexpr BYTE  kByteMax      = 255;   // 閾値系(TriggerThreshold/HysteresisLow)上限
 
     // デフォルト値で初期化(targetButtons = DPAD全方向+ABXY)
