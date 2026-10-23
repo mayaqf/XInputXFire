@@ -141,9 +141,13 @@ int main() {
         XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_A, 0, 100); // 64<=100<128 -> active維持
         XFireEngine::Apply(0, &s2);
         Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8: hysteresis keeps active in ON");
-        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_A, 0, 50);  // <64 -> released
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_A, 0, 50);  // <64 -> 連射判定は即解除(Issue #10 仕様行)
         XFireEngine::Apply(0, &s3);
-        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8b: released -> physical A (no xfire)");
+        // 連射判定(トリガ活性)は HysteresisLow 未満で即解除 -> triggerOwned=0 となり A は
+        // 物理素通り(ボタン単独モードの初回 ON)。ゲームへ渡すトリガ値のみ解除イベントの
+        // 遅延(hold)として押下値(held=200)を出し続ける
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8b: below low threshold releases judgment immediately (button passthrough)");
+        Check(s3.Gamepad.bRightTrigger == 200, "T8b2: held pressed trigger value outputs during hold delay");
     }
 
     // T9: LT 単独でも発動
@@ -228,7 +232,8 @@ int main() {
         Check((s.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T14: LT+RT both trigger ON");
     }
 
-    // T8c: OFF区間中にトリガ離上 -> 対象ボタンは物理状態に戻る(連射停止)
+    // T8c: OFF区間中にトリガ離上 -> 対象ボタンは即座に物理状態へ復帰(hysteresis 未満で即解除・
+    //      Issue #10 仕様行)。ゲームへ渡すトリガ値のみ hold 期限まで押下値を出し続ける
     {
         XFireEngine::ResetControllerState();
         XFireEngine::SetTestClockNowMs(0.0);
@@ -239,8 +244,14 @@ int main() {
         XFireEngine::Apply(0, &s2);         // OFF: A離
         Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_A) == 0, "T8c setup: OFF releases A");
         XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_A, 0, 0); // トリガ0、物理A押下
-        XFireEngine::Apply(0, &s3);         // released -> 物理 A
-        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8c: released during OFF -> physical A restored");
+        XFireEngine::Apply(0, &s3);         // HysteresisLow 未満 -> 連射判定は即解除
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8c: judgment released -> physical A immediately (v1.1)");
+        Check(s3.Gamepad.bRightTrigger == 200, "T8c2: held trigger value continues during hold delay");
+        XFireEngine::SetTestClockNowMs(170.0); // hold 期限(既定 delay=50 -> deadline t=60+50=110)経過済み
+        XINPUT_STATE s4 = MakeState(XINPUT_GAMEPAD_A, 0, 0); // トリガ0、物理A押下
+        XFireEngine::Apply(0, &s4);         // hold 期限到来 -> トリガ値も物理(0)へ降下
+        Check((s4.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T8c3: button stays passthrough after hold expires");
+        Check(s4.Gamepad.bRightTrigger == 0, "T8c4: hold expired -> trigger value passthrough");
     }
 
     // T15: マスタートグル — OFF時はトリガ押下でも連射せず、コンボ(LB|A)でON→連射、再コンボでOFF
@@ -440,12 +451,32 @@ int main() {
         WritePrivateProfileStringW(L"XFire", L"FirstOnMs", L"-1", path.c_str());
         WritePrivateProfileStringW(L"XFire", L"TriggerThreshold", L"999", path.c_str());
         WritePrivateProfileStringW(L"XFire", L"HysteresisLow", L"-5", path.c_str());
+        WritePrivateProfileStringW(L"XFire", L"TriggerOffDelayMs", L"999999", path.c_str());
         const XFireConfig& c = loadFromIni(path);
         Check(c.onMs == 1, "T22: OnMs=0 -> clamped to 1");
         Check(c.offMs == 10000, "T22b: OffMs=999999 -> clamped to 10000");
         Check(c.firstOnMs == 0, "T22c: FirstOnMs=-1 -> clamped to 0");
         Check(c.triggerThreshold == 255, "T22d: TriggerThreshold=999 -> clamped to 255");
         Check(c.hysteresisLow == 0, "T22e: HysteresisLow=-5 -> clamped to 0");
+        Check(c.triggerOffDelayMs == 10000, "T22h: TriggerOffDelayMs=999999 -> clamped to 10000");
+        DeleteFileW(path.c_str());
+    }
+
+    // T22i: TriggerOffDelayMs=-1 -> クランプ 0(無効=従来動作)
+    {
+        std::wstring path = tempIniPath(L"xfire_t22i.ini");
+        WritePrivateProfileStringW(L"XFire", L"TriggerOffDelayMs", L"-1", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.triggerOffDelayMs == 0, "T22i: TriggerOffDelayMs=-1 -> clamped to 0");
+        DeleteFileW(path.c_str());
+    }
+
+    // T22j: TriggerOffDelayMs 非数値 -> 既定
+    {
+        std::wstring path = tempIniPath(L"xfire_t22j.ini");
+        WritePrivateProfileStringW(L"XFire", L"TriggerOffDelayMs", L"soon", path.c_str());
+        const XFireConfig& c = loadFromIni(path);
+        Check(c.triggerOffDelayMs == 50, "T22j: TriggerOffDelayMs=soon (non-numeric) -> default 50");
         DeleteFileW(path.c_str());
     }
 
@@ -467,6 +498,7 @@ int main() {
         const XFireConfig& c = loadFromIni(path);
         Check(c.triggerThreshold == 150, "T22g: TriggerThreshold= empty -> default 150 (not 0)");
         Check(c.onMs == 50, "T22g2: OnMs= empty -> default 50 (not clamped to 1)");
+        Check(c.triggerOffDelayMs == 50, "T22g3: TriggerOffDelayMs= empty -> default 50");
         DeleteFileW(path.c_str());
     }
 
@@ -531,6 +563,7 @@ int main() {
         Check(d.firstOnMs == 200, "T28c: default firstOnMs == 200");
         Check(d.triggerThreshold == 150, "T28d: default triggerThreshold == 150");
         Check(d.hysteresisLow == 140, "T28e: default hysteresisLow == 140");
+        Check(d.triggerOffDelayMs == 50, "T28k: default triggerOffDelayMs == 50");
         Check(d.enableLT && d.enableRT, "T28f: default enableLT/RT true");
         Check(d.toggleButtons == (XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A), "T28g: default toggleButtons LB|A");
         Check(d.defaultEnabled == false, "T28h: default defaultEnabled false");
@@ -1017,6 +1050,560 @@ int main() {
         Check((s6.Gamepad.wButtons & XINPUT_GAMEPAD_A) != 0, "T42d: t=640 still first ON (re-anchored to 540)");
 
         XFireEngine::SetMasterEnabled(true);
+        Config::SetForTest(cfg);
+    }
+
+    // ---- T43-T49: トリガ解除遅延 TriggerOffDelayMs(Issue #10) ----
+    // 連射判定(トリガ活性)は HysteresisLow 未満で即解除(遅延は判定に効かないのでボタンの
+    // 連射も即停止)。解除後にゲームへ渡すトリガ値だけを押下値(held)として hold 期限まで
+    // 出し続け、期限到来で物理値へ降下(T50-T52 も参照)。
+    // 判別に使う性質: トリガ活性中は位相クロックの OFF 区間で X が強制 OFF になるが、
+    // 解除後は X が物理押下のまま素通し(=定常 ON・OFF ギャップなし)。
+
+    // T43(v2): 連射判定は HysteresisLow 未満で即解除(Issue #10 仕様行)・トリガ値のみ
+    //          hold 期限まで押下値を出し続ける
+    {
+        XFireConfig tcfg = cfg; tcfg.triggerOffDelayMs = 100;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200 + X 押下 -> 発動・ON 区間[0,50)・RT 素通り
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 200);
+        XFireEngine::Apply(0, &s0);
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T43: t=0 ON");
+
+        // t=60: RT=50(<64) -> 連射判定は即解除で triggerOwned=0: X は物理素通しで ON
+        //       (S1 の「OFF 区間でも X 強制 OFF」pin は判定遅延の廃止により反転)。トリガ値は
+        //       解除イベントの hold(期限 t=160)で押下値が出力される
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T43a: judgment released -> button passthrough (v1.1)");
+        Check(s1.Gamepad.bRightTrigger == 200, "T43a2: held pressed trigger value (200) outputs during hold");
+
+        // t=110: hold 中(160 未満) -> トリガ値は引き続き押下値
+        XFireEngine::SetTestClockNowMs(110.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s2);
+        Check(s2.Gamepad.bRightTrigger == 200, "T43b: hold continues (trigger value stays pressed)");
+
+        // t=170: 期限(t=160)到来 -> トリガ値も物理値へ降下・ボタンは物理素通しのまま
+        XFireEngine::SetTestClockNowMs(170.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s3);
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T43c: button passthrough after release");
+        Check(s3.Gamepad.bRightTrigger == 50, "T43c2: t=170 trigger value drops to physical after delay expires");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T44(v2): hold 中の再押下 -> 判定復帰で hold 打ち切り・held は現物理値へ re-anchor
+    //          (旧セッションの強押し値が次の解除時に「押していないのに再上昇」しない)
+    {
+        XFireConfig tcfg = cfg; tcfg.triggerOffDelayMs = 100;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: 発動(RT=200)
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: RT=50(<64) -> 連射判定即解除+hold arm(期限 t=160) -> RT は押下値(200)を出力
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T44a: t=60 judgment released (passthrough)");
+        Check(s1.Gamepad.bRightTrigger == 200, "T44a2: hold outputs pressed value");
+
+        // t=90: RT=160(再押下 >= 押下閾値 128) -> 判定復帰・hold 打ち切り・RT は素通り 160。
+        //      held は現物理値(160)へ re-anchor される(200 を引きずらない)
+        XFireEngine::SetTestClockNowMs(90.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_X, 0, 160);
+        XFireEngine::Apply(0, &s2);
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T44b: t=90 re-press re-activates judgment");
+        Check(s2.Gamepad.bRightTrigger == 160, "T44b2: re-press passthrough (hold cancelled)");
+
+        // t=120: RT=50 再落下 -> 新たな解除イベントで hold arm(期限 t=220)。
+        //        出力は held(160)=現セグメントの値で 200 に跳ね上がらない(P1 判別点)
+        XFireEngine::SetTestClockNowMs(120.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s3);
+        Check(s3.Gamepad.bRightTrigger == 160, "T44c: re-armed hold outputs re-anchored value (no phantom rise)");
+
+        // t=230: 期限(t=220)到来 -> RT は物理値(50)へ降下
+        XFireEngine::SetTestClockNowMs(230.0);
+        XINPUT_STATE s4 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s4);
+        Check(s4.Gamepad.bRightTrigger == 50, "T44d: re-armed hold expires -> physical value");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T45: TriggerOffDelayMs=0 -> 従来動作(HysteresisLow 未満で即解除)
+    {
+        XFireConfig tcfg = cfg; tcfg.triggerOffDelayMs = 0;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: 発動
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: RT=50 -> 期限 t=60(0 遅延)で即解除。X は物理素通しで ON
+        //       (もし遅延や位相継続が残っていれば OFF 区間[50,100)で X=0 になる判別点)
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T45: t=60 delay=0 releases immediately (X passthrough ON)");
+        Check(s1.Gamepad.bRightTrigger == 50, "T45c: delay=0 drops trigger value on the release frame (no held ghost)");
+
+        // t=70: 解除後は OFF ギャップなし
+        XFireEngine::SetTestClockNowMs(70.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s2);
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T45b: t=70 no OFF gap after release");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T46: 押下判定は従来どおり規定閾値必須(遅延実装で規定閾値が緩まないこと・
+    //      HysteresisLow 以上 TriggerThreshold 未満の入力は発動せず hold も arm しない)
+    {
+        XFireConfig tcfg = cfg; tcfg.triggerOffDelayMs = 100;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=100(規定閾値 128 未満・HysteresisLow 64 以上)+ X 押下 -> 発動しない
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 100);
+        XFireEngine::Apply(0, &s0);
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T46: t=0 below threshold -> physical passthrough");
+
+        // t=70: もし発動していたら位相 OFF 区間[50,100)で X=0。発動していないので物理通しで ON
+        XFireEngine::SetTestClockNowMs(70.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 100);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T46b: t=70 never activated (no OFF gap at OFF window)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T47(v2): 完全解除後も、HysteresisLow 以上 TriggerThreshold 未満のトリガ値では判定は
+    //          再立上せず hold も再 arm しない(発動は常に規定閾値必須・アドバイザー指摘の
+    //          ピン留めが S2 でも成立)
+    {
+        XFireConfig tcfg = cfg; tcfg.triggerOffDelayMs = 100;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: 発動
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: RT=50 -> 判定即解除: X は物理素通し ON・hold(期限 t=160)で RT==200
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T47a: t=60 judgment released (passthrough)");
+        Check(s1.Gamepad.bRightTrigger == 200, "T47a2: t=60 held trigger value outputs during hold");
+
+        // t=170: 期限(t=160)経過 -> RT は物理値へ降下
+        XFireEngine::SetTestClockNowMs(170.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s2);
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T47b: t=170 button passthrough");
+        Check(s2.Gamepad.bRightTrigger == 50, "T47b2: t=170 hold expired, physical value");
+
+        // t=175: RT=100(64以上128未満)に下げても判定は再立上せず・新たな hold も arm されない
+        //        (解除イベントは t=60 の1回のみで消化済み)
+        XFireEngine::SetTestClockNowMs(175.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_X, 0, 100);
+        XFireEngine::Apply(0, &s3);
+
+        // t=250: 素通りに変化なし(物理 100 そのまま)
+        XFireEngine::SetTestClockNowMs(250.0);
+        XINPUT_STATE s4 = MakeState(XINPUT_GAMEPAD_X, 0, 100);
+        XFireEngine::Apply(0, &s4);
+        Check((s4.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T47c: no re-arm between thresholds after full release");
+        Check(s4.Gamepad.bRightTrigger == 100, "T47c2: no hold re-arm between thresholds");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T48(v2): 重複ボタン(X をトリガ/ボタン単独の両リストに載せた構成)は判定解除フレームで
+    //          ボタン単独モードへ v1.1 どおり引き継ぎ(物理押下中なので押下が途切れない)。
+    //          トリガ値のみ hold 期限まで押下値。引き継ぎ後はボタン単独モードが駆動
+    //          (初回 ON 区間[60,560) -> OFF[560,610) で X=0 になる点が所有権の判別点)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.targetButtons = XINPUT_GAMEPAD_X;
+        tcfg.buttonTargetButtons = XINPUT_GAMEPAD_X; // 重複構成
+        tcfg.buttonFirstOnMs = 500; tcfg.buttonOnMs = 50; tcfg.buttonOffMs = 50;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200 + X 押下 -> トリガモードが所有・ON 区間[0,50)・RT 素通り
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 200);
+        XFireEngine::Apply(0, &s0);
+        Check((s0.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T48: t=0 trigger mode owns X (ON)");
+        Check(s0.Gamepad.bRightTrigger == 200, "T48b0: pressed trigger passthrough");
+
+        // t=60: RT=50 -> 判定即解除で triggerOwned=0 -> ボタン単独モードが初回 ON[60,560) で
+        //       X 押下を継続(物理押下中なので途切れない)。トリガ値は hold(期限 t=160)で押下値
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s1);
+        Check((s1.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T48a: handoff to button-only keeps X pressed (no gap, v1.1)");
+        Check(s1.Gamepad.bRightTrigger == 200, "T48a2: held trigger value during hold");
+
+        // t=110: hold 中 -> X は引き継ぎ先(初回 ON 中)で押下継続・RT==200
+        XFireEngine::SetTestClockNowMs(110.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s2);
+        Check((s2.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T48b: button-only first ON continues");
+        Check(s2.Gamepad.bRightTrigger == 200, "T48b2: hold continues");
+
+        // t=170: 期限(t=160)到来 -> RT は物理値へ降下。X は初回 ON 継続中
+        XFireEngine::SetTestClockNowMs(170.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s3);
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T48c: X stays pressed (first ON window)");
+        Check(s3.Gamepad.bRightTrigger == 50, "T48c2: hold expired -> physical value");
+
+        // t=580: ボタン単独モードの OFF 窓[560,610) -> X=0。トリガモードが所有し続けていたら
+        //        判定解除済みなので X は物理素通し ON のままになる点が判別点
+        XFireEngine::SetTestClockNowMs(580.0);
+        XINPUT_STATE s4 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s4);
+        Check((s4.Gamepad.wButtons & XINPUT_GAMEPAD_X) == 0, "T48d: button-only mode drives X (its OFF window opens)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T49: マスタートグル OFF で押下ホールドもクリアされる
+    //      (再ON後に古い期限で連射が再開しないことの直接検証)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.targetButtons = XINPUT_GAMEPAD_X;
+        tcfg.toggleButtons = XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A; // LB|A
+        tcfg.announceEnabled = false; // テスト中は SAPI 音声再生を避ける
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: 発動
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(XINPUT_GAMEPAD_X, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: RT=50 -> 連射判定即解除+押下ホールド arm(期限 t=160)
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s1);
+
+        // t=65: LB+A 立ち上がり -> マスター OFF(このフレームは素通し・ホールドもクリア)
+        XFireEngine::SetTestClockNowMs(65.0);
+        XINPUT_STATE s2 = MakeState(XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s2);
+
+        // t=70: マスターOFF 中は素通し
+        XFireEngine::SetTestClockNowMs(70.0);
+        XINPUT_STATE s3 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s3);
+        Check((s3.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T49a: master OFF -> X physical passthrough");
+
+        // t=75: 再び LB+A 立ち上がり -> マスター ON(このフレームは素通し)
+        XFireEngine::SetTestClockNowMs(75.0);
+        XINPUT_STATE s4 = MakeState(XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_A, 0, 0);
+        XFireEngine::Apply(0, &s4);
+
+        // t=80: マスターON 復帰。s.active もホールドもクリア済みなので低トリガでは発動せず
+        //        X は物理素通し ON
+        XFireEngine::SetTestClockNowMs(80.0);
+        XINPUT_STATE s5 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s5);
+        Check((s5.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T49b: t=80 no re-fire from stale delay state");
+
+        // t=140: ホールドがクリアされていなければ期限(t=160)未満なので遅延出力が続き、
+        //        位相 OFF 区間[130,180) で X=0 になる。クリア済みなら物理素通しのまま ON
+        XFireEngine::SetTestClockNowMs(140.0);
+        XINPUT_STATE s6 = MakeState(XINPUT_GAMEPAD_X, 0, 50);
+        XFireEngine::Apply(0, &s6);
+        Check((s6.Gamepad.wButtons & XINPUT_GAMEPAD_X) != 0, "T49c: t=140 stale deadline cleared on master OFF (no OFF window)");
+        // T49a2 は素通しパス自体が値を書かないことの pin(クリア漏れの本丸 pin は T49b2/T49c2)
+        Check(s3.Gamepad.bRightTrigger == 50, "T49a2: master OFF passthrough trigger value (no held)");
+        Check(s5.Gamepad.bRightTrigger == 50, "T49b2: no phantom held trigger after master OFF cycle");
+        Check(s6.Gamepad.bRightTrigger == 50, "T49c2: t=140 held stays cleared after master OFF cycle");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T50-T54: トリガ押下ホールド(Issue #10・ゲームから見た押下状態の遅延継続)
+    // 連射判定は HysteresisLow 未満で即解除(ボタンの連射は判定解除で即停止)だが、判定解除
+    // イベントから TriggerOffDelayMs の間はゲームへ渡すトリガ値(held=押下閾値以上で見た押下
+    // セグメント最大値)を出し続け、期限で物理値へ降下。判定が再活性化すれば hold 打ち切り+
+    // held re-anchor(旧セッションの強度は消える)。
+
+    // T50: held の出力継続・期限到来での降下・packet 進行(対象ボタンなしでトリガ単独検証)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200 単独 -> 素通り 200。出力が前回(0)から変わるので packet が進む
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(0, 0, 200);
+        s0.dwPacketNumber = 100;
+        XFireEngine::Apply(0, &s0);
+        Check(s0.Gamepad.bRightTrigger == 200, "T50: pressed trigger passthrough");
+        Check(s0.dwPacketNumber == 101, "T50b: first output change advances packet");
+
+        // t=60: RT=30(<64) -> 判定解除+hold arm: 出力は held(200) 継続・物理 30 は見えない
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 30);
+        s1.dwPacketNumber = 101;
+        XFireEngine::Apply(0, &s1);
+        Check(s1.Gamepad.bRightTrigger == 200, "T50c: held value outputs during delay");
+        Check(s1.dwPacketNumber == 101, "T50d: constant held output keeps packet");
+
+        // t=170: 期限(t=160)到来 -> 物理値へ降下・held クリア。出力変化で packet が進む
+        XFireEngine::SetTestClockNowMs(170.0);
+        XINPUT_STATE s2 = MakeState(0, 0, 30);
+        s2.dwPacketNumber = 400;
+        XFireEngine::Apply(0, &s2);
+        Check(s2.Gamepad.bRightTrigger == 30, "T50e: delay expires, triggers drop to physical");
+        Check(s2.dwPacketNumber == 401, "T50f: held->physical drop advances packet once");
+
+        // t=175: 解除後は held を持ち越さない(引き続き物理素通り)
+        XFireEngine::SetTestClockNowMs(175.0);
+        XINPUT_STATE s3 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s3);
+        Check(s3.Gamepad.bRightTrigger == 30, "T50g: no held carryover after release");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T51: トリガ間の非干渉と held 持ち越し防止(RT セッション後の LT セッション)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // セッション1: RT のみ(RT=180。LT は最初から 0 のまま)
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(0, 0, 180);
+        XFireEngine::Apply(0, &s0);
+        Check(s0.Gamepad.bRightTrigger == 180 && s0.Gamepad.bLeftTrigger == 0, "T51: RT session passthrough, LT untouched");
+
+        // t=60: RT=30 -> hold 中: RT は held(180)、LT は 0 のまま(未押下側は触られない)
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s1);
+        Check(s1.Gamepad.bRightTrigger == 180 && s1.Gamepad.bLeftTrigger == 0, "T51b: held only on pressed trigger, other stays 0");
+
+        // t=170: 期限到来 -> held クリア
+        XFireEngine::SetTestClockNowMs(170.0);
+        XINPUT_STATE s2 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s2);
+        Check(s2.Gamepad.bRightTrigger == 30, "T51c: RT released, held cleared");
+
+        // セッション2: LT のみ(LT=160) -> 古い RT held を持ち込まない
+        XFireEngine::SetTestClockNowMs(200.0);
+        XINPUT_STATE s3 = MakeState(0, 160, 0);
+        XFireEngine::Apply(0, &s3);
+        Check(s3.Gamepad.bLeftTrigger == 160 && s3.Gamepad.bRightTrigger == 0, "T51d: new LT session starts clean");
+
+        // t=260: LT=20 -> hold 中: LT は held(160)、RT は 0 のまま(stale 持ち越しなし)
+        XFireEngine::SetTestClockNowMs(260.0);
+        XINPUT_STATE s4 = MakeState(0, 20, 0);
+        XFireEngine::Apply(0, &s4);
+        Check(s4.Gamepad.bLeftTrigger == 160 && s4.Gamepad.bRightTrigger == 0, "T51e: LT held, no stale RT carryover");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T52(v2): 回復帯域(>= HysteresisLow・< 押下閾値)滞留中も hold はキャンセルされず deadline も
+    //          延長されない。期限で物理値へ降下。その後の再落下では再 arm しない(解除イベント
+    //          1 回につき hold 1 回・判定の再活性化がなければ戻らない)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200(押下セグメント開始)
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(0, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: RT=30(<64) -> 判定即解除+hold arm(期限 t=160)
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s1);
+        Check(s1.Gamepad.bRightTrigger == 200, "T52: hold outputs pressed value");
+
+        // t=90: RT=100(回復帯域) -> 判定は非活性のまま・hold は継続(deadline も据え置き)
+        XFireEngine::SetTestClockNowMs(90.0);
+        XINPUT_STATE s2 = MakeState(0, 0, 100);
+        XFireEngine::Apply(0, &s2);
+        Check(s2.Gamepad.bRightTrigger == 200, "T52b: recovery band does not cancel hold (held continuing)");
+
+        // t=200: 期限(t=160)は回復帯域滞留で延長されないため到来済み -> RT は物理値(100)。
+        //        (回復で deadline が 90+100=220 に延長されていればここでも held 200 が出る判別点)
+        XFireEngine::SetTestClockNowMs(200.0);
+        XINPUT_STATE s3 = MakeState(0, 0, 100);
+        XFireEngine::Apply(0, &s3);
+        Check(s3.Gamepad.bRightTrigger == 100, "T52c: hold expires on original deadline (no extension from band dwell)");
+
+        // t=230: RT=30 再落下 -> 解除イベントは消化済みで判定が再活性化していないため再 arm なし
+        XFireEngine::SetTestClockNowMs(230.0);
+        XINPUT_STATE s4 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s4);
+        Check(s4.Gamepad.bRightTrigger == 30, "T52d: no hold re-arm without judgment re-activation");
+
+        // t=250: 素通りに変化なし
+        XFireEngine::SetTestClockNowMs(250.0);
+        XINPUT_STATE s5 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s5);
+        Check(s5.Gamepad.bRightTrigger == 30, "T52e: physical passthrough continues");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T53: delay=0 は解除フレームで held を出さない(即解除・クリア同フレーム)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 0;
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(0, 0, 200);
+        XFireEngine::Apply(0, &s0);
+        Check(s0.Gamepad.bRightTrigger == 200, "T53: pressed passthrough");
+
+        // t=60: RT=50 -> 遅延無効: 解除と同フレームで物理値へ降下(held 幽霊フレームなし)
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 50);
+        XFireEngine::Apply(0, &s1);
+        Check(s1.Gamepad.bRightTrigger == 50, "T53b: delay=0 drops trigger on release frame (no held ghost)");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T54: 他コントローラ経由のマスターOFFでも held/ホールドは初期化(再ON後のファントム出力なし)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200 で発動
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(0, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: マスター OFF(SetMasterEnabled = 他コントローラのコンボ相当)して RT=30 を通す
+        //      素通しパスでもセッション状態はクリアされる
+        XFireEngine::SetMasterEnabled(false);
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s1);
+        // この素通しフレームの表明は値を書かないことの pin(クリア漏れの本丸 pin は T54b/T54c)
+        Check(s1.Gamepad.bRightTrigger == 30, "T54: master OFF passthrough, no held output");
+
+        // t=70: マスター再ON。held/ホールドはクリア済みなので遅延出力も再発火もなし
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::SetTestClockNowMs(70.0);
+        XINPUT_STATE s2 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s2);
+        Check(s2.Gamepad.bRightTrigger == 30, "T54b: no phantom held after master OFF cycle");
+
+        // t=140: 期限(t=160)未満でもホールドは消えている(再開なし・物理素通し)
+        XFireEngine::SetTestClockNowMs(140.0);
+        XINPUT_STATE s3 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s3);
+        Check(s3.Gamepad.bRightTrigger == 30, "T54c: stale pending stays cleared within old deadline");
+
+        Config::SetForTest(cfg);
+    }
+
+    // T55: 反対トリガの再押下で複合 hold を打ち切り・未押下側の stale held も re-anchor=0
+    //      (後続の解放イベントで RT の古い強押し値が再上昇しない=P5/アドバイザー承認時
+    //      回帰防止 pin)
+    {
+        XFireConfig tcfg = cfg;
+        tcfg.triggerOffDelayMs = 100;
+        tcfg.onMs = 50; tcfg.offMs = 50; tcfg.firstOnMs = 0;
+        tcfg.triggerThreshold = 128; tcfg.hysteresisLow = 64;
+        Config::SetForTest(tcfg);
+        XFireEngine::SetMasterEnabled(true);
+        XFireEngine::ResetControllerState();
+
+        // t=0: RT=200 押下(heldRT=200)
+        XFireEngine::SetTestClockNowMs(0.0);
+        XINPUT_STATE s0 = MakeState(0, 0, 200);
+        XFireEngine::Apply(0, &s0);
+
+        // t=60: RT=30 -> 判定即解除+hold arm(期限 t=160) -> RT は押下値 200
+        XFireEngine::SetTestClockNowMs(60.0);
+        XINPUT_STATE s1 = MakeState(0, 0, 30);
+        XFireEngine::Apply(0, &s1);
+        Check(s1.Gamepad.bRightTrigger == 200, "T55: hold outputs RT pressed value");
+
+        // t=90: LT=160(再押下 >= 押下閾値) -> 判定が復帰(複合判定)で両トリガの hold 打ち切り。
+        //      heldRT は押下閾値未満のため re-anchor=0(stale の 200 を消す)·heldLT=160
+        XFireEngine::SetTestClockNowMs(90.0);
+        XINPUT_STATE s2 = MakeState(0, 160, 30);
+        XFireEngine::Apply(0, &s2);
+        Check(s2.Gamepad.bRightTrigger == 30, "T55b: cross-trigger re-press cancels hold (RT passthrough)");
+        Check(s2.Gamepad.bLeftTrigger == 160, "T55c: re-pressed LT passthrough");
+
+        // t=150: RT=30 で解放 -> 後続の解放イベントで hold 再 arm(期限 t=250)。
+        //        RT は re-anchor 済みのため 30(stale 再上昇なし)·LT は現セグメント値 160
+        XFireEngine::SetTestClockNowMs(150.0);
+        XINPUT_STATE s3 = MakeState(0, 30, 30);
+        XFireEngine::Apply(0, &s3);
+        Check(s3.Gamepad.bRightTrigger == 30, "T55d: no stale RT held resurgence on later hold");
+        Check(s3.Gamepad.bLeftTrigger == 160, "T55e: LT hold outputs segment value");
+
+        // t=160: hold 継続中も同様(RT=30·LT=160)
+        XFireEngine::SetTestClockNowMs(160.0);
+        XINPUT_STATE s4 = MakeState(0, 30, 30);
+        XFireEngine::Apply(0, &s4);
+        Check(s4.Gamepad.bRightTrigger == 30 && s4.Gamepad.bLeftTrigger == 160, "T55f: hold state stable within deadline");
+
         Config::SetForTest(cfg);
     }
 

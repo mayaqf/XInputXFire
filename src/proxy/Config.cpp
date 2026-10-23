@@ -90,6 +90,9 @@ void Config::LoadOnce() {
             g_cfg.firstOnMs        = readClampedDw(sec, L"FirstOnMs",       "FirstOnMs",       g_cfg.firstOnMs,        (INT)Config::kFirstOnMsMin, (INT)Config::kOnMsMax);
             g_cfg.triggerThreshold = readClampedByte(sec, L"TriggerThreshold", "TriggerThreshold", g_cfg.triggerThreshold);
             g_cfg.hysteresisLow    = readClampedByte(sec, L"HysteresisLow",    "HysteresisLow",    g_cfg.hysteresisLow);
+            // TriggerOffDelayMs は 0=無効を許可([kTriggerOffDelayMsMin,kOnMsMax])。
+            // 0 のとき HysteresisLow 未満で即解除(従来動作)。Issue #10。
+            g_cfg.triggerOffDelayMs = readClampedDw(sec, L"TriggerOffDelayMs", "TriggerOffDelayMs", g_cfg.triggerOffDelayMs, (INT)Config::kTriggerOffDelayMsMin, (INT)Config::kOnMsMax);
             // EnableLT/RT は 1/0/true/false/yes/no/on/off で記録(不明値=既定+ログ)。
             g_cfg.enableLT         = readBool(sec, L"EnableLT", "EnableLT", g_cfg.enableLT);
             g_cfg.enableRT         = readBool(sec, L"EnableRT", "EnableRT", g_cfg.enableRT);

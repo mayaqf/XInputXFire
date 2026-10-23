@@ -32,8 +32,9 @@ game.exe ─(implicit DLL resolution)─▶ local xinput1_3.dll [proxy]
 - **Timing**: QPC high-resolution timer. ON window (default 50 ms) = button pressed, OFF window (default 50 ms) = button released. Independent of the game's polling rate (60/120 Hz, etc.).
 - **First ON window (`FirstOnMs`)**: only the first ON window right after a target button is pressed can use its own length (default 200 ms; 0 = disabled = same as `OnMs`). The phase clock is referenced to the target button press and resets when the button is released, so the next press starts from `FirstOnMs` again. Making `FirstOnMs` large lets you land a **single press** even while turbo is enabled (release during the long first ON window).
 - **Hysteresis**: press threshold 150 / release threshold 140, so trigger chatter near the threshold can't send the turbo into a runaway.
+- **Trigger release delay (`TriggerOffDelayMs`, v1.2.0)**: the trigger rapid-fire judgment itself **releases as soon as** LT/RT drops below the release threshold (hysteresis only, as specified in Issue #10). On that release, the **trigger value sent to the game holds the pressed value** (the press-segment max seen at or above the press threshold) for this duration (default **50 ms**; `0` = disabled = legacy behavior), delaying the game's own trigger-off judgment by the same amount. Button rapid fire stops with the judgment release and overlapped buttons hand over to button-only mode as usual. Pressing back at or above the press threshold re-activates the judgment and cancels the hold (and re-anchors the held value to the current physical one); the value drops to the physical one when the delay expires. This bridges a slightly-early trigger release: releasing the button and trigger together no longer lets the game register a button-only press during the residual gap.
 - **4 controllers, independent**: `dwUserIndex` 0–3 each keep their own state.
-- **Trigger passthrough**: LT/RT analog values reach the game untouched (turbo only affects D-pad/ABXY).
+- **Trigger passthrough**: LT/RT analog values reach the game untouched, except during the release delay where the pressed value is held until the delay expires (turbo only affects D-pad/ABXY).
 - **Only physically-held buttons fire**: turbo applies only to target buttons you are physically holding. Release to stop.
 
 ### Button-only rapid fire mode (`[RapidFire]`, v1.1.0)
@@ -60,7 +61,7 @@ A second mode that rapid-fires while a target button is **held down**, without t
 Place it next to the game exe. If missing, defaults are used.
 
 ```ini
-; XInputXFire v1.1.1
+; XInputXFire v1.2.0
 [XFire]
 OnMs=50
 OffMs=50
@@ -69,6 +70,17 @@ OffMs=50
 FirstOnMs=200
 TriggerThreshold=150
 HysteresisLow=140
+; Keep HysteresisLow below TriggerThreshold.
+; Trigger release delay (ms; default 50; 0 = disabled).
+; The rapid-fire judgment itself releases as soon as LT/RT drops below HysteresisLow,
+; but the trigger value sent to the game keeps the pressed value (press-segment max
+; seen at or above TriggerThreshold) for this duration, delaying the game's own
+; trigger-off judgment by the same amount (button rapid fire stops with the judgment
+; release; overlapped buttons hand over to button-only mode as usual). The value
+; drops to the physical one when the delay expires. Pressing back at or above
+; TriggerThreshold re-activates the judgment and cancels the hold. Bridges a
+; slightly-early trigger release when releasing the button and trigger together.
+TriggerOffDelayMs=50
 TargetButtons=DPAD_UP|DPAD_DOWN|DPAD_LEFT|DPAD_RIGHT|A|B|X|Y
 EnableLT=1
 EnableRT=1
@@ -130,7 +142,7 @@ Artifacts:
 1. **Unit tests** (`xfire_unit`): verifies the rapid-fire logic with mock QPC time injection (ON/OFF periods, hysteresis, trigger passthrough, non-target protection, 4-controller independence, button-only mode, 2-mode overlap resolution, phase reset on master toggle). No controller needed.
 2. **Test harness** (`test_harness`): place the proxy DLL in its own folder as `xinput1_3.dll` and run it; a CSV log confirms whether target buttons toggle periodically while RT is physically held (60 s).
    - **On systems with Smart App Control (SAC) enabled, test_harness.exe may fail to launch.** SAC blocks new unsigned binaries with no reputation in Microsoft's cloud as "unverified" (this is not path-based, so copying to Program Files doesn't help, and there is no user-side exception). Check event log `Microsoft-Windows-CodeIntegrity/Operational`, IDs 3118/3033, for "Smart App Control Block".
-   - The **production proxy DLL is not blocked under SAC** (a DLL loaded via LoadLibrary by a signed game exe is allowed). SAC only catches standalone unsigned exes like test_harness. If test_harness won't launch, verify on another PC/VM with SAC off, or test through a real game.
+   - **SAC can also block the production proxy DLL** (verified 2026-10-23): even though the DLL is loaded via LoadLibrary from a signed game exe, SAC rejects unsigned DLLs under its signing policy. The symptom is misleading — the game exits with a `bad image / status 0xc000012f` dialog naming the DLL, and the `Microsoft-Windows-CodeIntegrity/Operational` log shows IDs **3077/3033** ("did not meet the Enterprise signing level requirements", Smart App Control policy), not the 3118 seen for standalone exes. The DLL itself is intact; the only user-side fix is turning **Smart App Control off** (Windows Security → App & browser control → Smart App Control settings). Code signing alone does not pass SAC without cloud reputation.
 3. **Integration**: place it in a permitted offline game and verify live behavior.
 
 ## Game compatibility
